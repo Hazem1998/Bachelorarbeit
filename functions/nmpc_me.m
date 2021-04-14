@@ -1,7 +1,9 @@
-function [t, x, u] = nmpc_me(runningcosts, terminalcosts, ...
+function [t, x, u] = nmpc_me(runningcosts, ...
               constraints, terminalconstraints, ...
               linearconstraints, system, ...
-              mpciterations, N, T, tmeasure, xmeasure, u0, x_ref, Non_linear_system)
+              mpciterations, N, T, tmeasure, xmeasure, u0, x_ref, ...
+              Non_linear_system, param, discret_system_matrices, ...
+              printHeader, printClosedloopData, plotTrajectories)
 
 % Computes the closed loop solution for the NMPC problem defined by
 % the functions
@@ -139,35 +141,42 @@ function [t, x, u] = nmpc_me(runningcosts, terminalcosts, ...
                 'RelLineSrchBnd', [],...
                 'RelLineSrchBndDuration', 1,...
                 'TolConSQP', 1e-6);
- iprint = 1;
+ iprint = 5;
     t = []; % Will be used to plot the results
     x = [];
     u = [];
-    
+    u_init = param.input;
     % Start of the NMPC iteration
     mpciter = 0;
     while(mpciter < mpciterations)
         % Step (1) of the NMPC algorithm:
         %   Obtain new initial value
-        [t0, x0] = measureInitialValue ( tmeasure, xmeasure );
+        t0 = tmeasure;
+        x0 = xmeasure;
+        
+        f = Non_linear_system(x0, u_init, param);    
+        [A_d, B_d] = discret_system_matrices(t, x0, u_init, T, param);
+        linearisation.A = A_d;
+        linearisation.B = B_d;
+        linearisation.f = f;
         
         % Step (2) of the NMPC algorithm:
         %   Solve the optimal control problem
         t_Start = tic;
         [u_new, V_current, exitflag, output] = solveOptimalControlProblem ...
-            (runningcosts, terminalcosts, constraints, ...
+            (runningcosts, constraints, ...
             terminalconstraints, linearconstraints, system, ...
-            N, t0, x0, u0, T,tol_opt, options, x_ref);
+            N, t0, x0, u0, T,tol_opt, options, x_ref(mpciter+1,:), param , linearisation);
         t_Elapsed = toc( t_Start );
         
         %   Print solution : I will check it later
         
-%         if ( iprint >= 1 )
-%             printSolution(system, printHeader, printClosedloopData, ...
-%                           plotTrajectories, mpciter, T, t0, x0, u_new, ...
-%                           iprint, ...
-%                           exitflag, output, t_Elapsed);
-%         end
+        if ( iprint >= 1 )
+            printSolution(system, printHeader, printClosedloopData, ...
+                          plotTrajectories, mpciter, T, t0, x0, u_new, ...
+                          iprint, ...
+                          exitflag, output, t_Elapsed, param, linearisation, x_ref);
+        end
 
 
         %   Store closed loop data
@@ -179,36 +188,22 @@ function [t, x, u] = nmpc_me(runningcosts, terminalcosts, ...
         
         % Step (3) of the NMPC algorithm:
         %   Apply control to process
-        [tmeasure, xmeasure] = applyControl(Non_linear_system, T, t0, x0, u_new);
+        [tmeasure, xmeasure] = applyControl(system, T, t0, x0, u_new, param, linearisation);
         mpciter = mpciter+1
     end
 end
 
-
-function [t0, x0] = measureInitialValue ( tmeasure, xmeasure )
-    t0 = tmeasure;
-    x0 = xmeasure;
-end
-
-
-function [tapplied, xapplied] = applyControl(Non_linear_system, T, t0, x0, u)
-    xapplied = Non_linear_system(x0, u(:,1));
+function [tapplied, xapplied] = applyControl(system, T, t0, x0, u, param, linearisation)
+    xapplied = system(t0, x0, u(:,1), T, x0, param, linearisation);
     tapplied = t0+T;
 end
 
-function [x, t_intermediate, x_intermediate] = dynamic(system, T, t0, x0, u, x_curr)
-% t_intermediate, x_intermediate will be needed to plot the results
-        x = system(t0, x0, u, T, x_curr);
-        x_intermediate = [x0; x];
-        t_intermediate = [t0, t0+T];
-
-end
 
 function [u, V, exitflag, output] = solveOptimalControlProblem ...
-    (runningcosts, terminalcosts, constraints, terminalconstraints, ...
-    linearconstraints, system, N, t0, x0, u0, T, tol_opt, options, x_ref)
+    (runningcosts, constraints, terminalconstraints, ...
+    linearconstraints, system, N, t0, x0, u0, T, tol_opt, options, x_ref, param, linearisation)
     x = zeros(N+1, length(x0));
-    x = computeOpenloopSolution(system, N, T, t0, x0, u0);
+    x = computeOpenloopSolution(system, N, T, t0, x0, u0, param, linearisation);
 
     % Set control and linear bounds
     A = [];
@@ -230,16 +225,17 @@ function [u, V, exitflag, output] = solveOptimalControlProblem ...
 
     % Solve optimization problem
     [u, V, exitflag, output] = fmincon(@(u) costfunction(runningcosts, ...
-        terminalcosts, system, N, T, t0, x0, ...
-        u,x_ref), u0, A, b, Aeq, beq, lb, ...
+        system, N, T, t0, x0, ...
+        u,x_ref,param, linearisation), u0, A, b, Aeq, beq, lb, ...
         ub, @(u) nonlinearconstraints(constraints, terminalconstraints, ...
-        system, N, T, t0, x0, u), options);
+        system, N, T, t0, x0, u, param, linearisation), options);
 end
 
-function x = computeOpenloopSolution(system, N, T, t0, x0, u)
+function x = computeOpenloopSolution(system, N, T, t0, x0, u, param, linearisation)
     x(1,:) = x0;
     for k=1:N
-        x(k+1,:) = dynamic(system, T, t0, x(k,:), u(:,k), x0); %% remove ; to see the states of the system
+        %x(k+1,:) = dynamic(system, T, t0, x(k,:), u(:,k), x0); %% remove ; to see the states of the system
+        x(k+1,:) = system(t0, x(k,:), u(:,k), T, x0, param, linearisation);
                          
     end
 end
@@ -248,23 +244,22 @@ function u0 = shiftHorizon(u)
     u0 = [u(:,2:size(u,2)) u(:,size(u,2))];
 end
 
-function cost = costfunction(runningcosts, terminalcosts, system, ...
-                    N, T, t0, x0, u, x_ref)
+function cost = costfunction(runningcosts, system, ...
+                    N, T, t0, x0, u, x_ref, param, linearisation)
     cost = 0;
     x = zeros(N+1, length(x0));
-    x = computeOpenloopSolution(system, N, T, t0, x0, u);
+    x = computeOpenloopSolution(system, N, T, t0, x0, u, param, linearisation);
     cost = runningcosts(t0+1*T, x(1,:), [[1;1],u(:,1)], x_ref);
     for k=2:N
         cost = cost+runningcosts(t0+k*T, x(k,:), u(:,k-1:k), x_ref); % changed to include u(k-1) and x_ref
     end
-    cost = cost+terminalcosts(t0+(N+1)*T, x(N+1,:));
 end
 
 function [c,ceq] = nonlinearconstraints(constraints, ...
     terminalconstraints, system, ...
-    N, T, t0, x0, u)
+    N, T, t0, x0, u, param, linearisation)
     x = zeros(N+1, length(x0));
-    x = computeOpenloopSolution(system, N, T, t0, x0, u);
+    x = computeOpenloopSolution(system, N, T, t0, x0, u, param, linearisation);
     c = [];
     ceq = [];
     for k=1:N
@@ -281,86 +276,98 @@ end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%% OUTPUT %%%%%%%%%%%%%
-% function printSolution(system, printHeader, printClosedloopData, ...
-%              plotTrajectories, mpciter, T, t0, x0, u, iprint, exitflag, output, t_Elapsed)
-%     if (mpciter == 0)
-%         printHeader();
-%     end
-%     printClosedloopData(mpciter, u, x0, t_Elapsed);
-%     switch exitflag
-%         case -2
-%         if ( iprint >= 1 && iprint < 10 )
-%             fprintf(' Error F\n');
-%         elseif ( iprint >= 10 )
-%             fprintf(' Error: No feasible point was found\n')
-%         end
-%         case -1
-%         if ( iprint >= 1 && iprint < 10 )
-%             fprintf(' Error OT\n');
-%         elseif ( iprint >= 10 )
-%             fprintf([' Error: The output function terminated the',...
-%                      ' algorithm\n'])
-%         end
-%         case 0
-%         if ( iprint == 1 )
-%             fprintf('\n');
-%         elseif ( iprint >= 2 && iprint < 10 )
-%             fprintf(' Warning IT\n');
-%         elseif ( iprint >= 10 )
-%             fprintf([' Warning: Number of iterations exceeded',...
-%                      ' options.MaxIter or number of function',...
-%                      ' evaluations exceeded options.FunEvals\n'])
-%         end
-%         case 1
-%         if ( iprint == 1 )
-%             fprintf('\n');
-%         elseif ( iprint >= 2 && iprint < 10 )
-%             fprintf(' \n');
-%         elseif ( iprint >= 10 )
-%             fprintf([' First-order optimality measure was less',...
-%                      ' than options.TolFun, and maximum constraint',...
-%                      ' violation was less than options.TolCon\n'])
-%         end
-%         case 2
-%         if ( iprint == 1 )
-%             fprintf('\n');
-%         elseif ( iprint >= 2 && iprint < 10 )
-%             fprintf(' Warning TX\n');
-%         elseif ( iprint >= 10 )
-%             fprintf(' Warning: Change in x was less than options.TolX\n')
-%         end
-%         case 3
-%         if ( iprint == 1 )
-%             fprintf('\n');
-%         elseif ( iprint >= 2 && iprint < 10 )
-%             fprintf(' Warning TJ\n');
-%         elseif ( iprint >= 10 )
-%             fprintf([' Warning: Change in the objective function',...
-%                      ' value was less than options.TolFun\n'])
-%         end
-%         case 4
-%         if ( iprint == 1 )
-%             fprintf('\n');
-%         elseif ( iprint >= 2 && iprint < 10 )
-%             fprintf(' Warning S\n');
-%         elseif ( iprint >= 10 )
-%             fprintf([' Warning: Magnitude of the search direction',...
-%                      ' was less than 2*options.TolX and constraint',...
-%                      ' violation was less than options.TolCon\n'])
-%         end
-%         case 5
-%         if ( iprint == 1 )
-%             fprintf('\n');
-%         elseif ( iprint >= 2 && iprint < 10 )
-%             fprintf(' Warning D\n');
-%         elseif ( iprint >= 10 )
-%             fprintf([' Warning: Magnitude of directional derivative',...
-%                      ' in search direction was less than',...
-%                      ' 2*options.TolFun and maximum constraint',...
-%                      ' violation was less than options.TolCon\n'])
-%         end
-%     end
-%     if ( iprint >= 5 )
-%         plotTrajectories(@dynamic, system, T, t0, x0, u)
-%     end
+function printSolution(system, printHeader, printClosedloopData, ...
+             plotTrajectories, mpciter, T, t0, x0, u, iprint, exitflag, output, t_Elapsed, ...
+             param, linearisation, x_ref)
+    if (mpciter == 0)
+        printHeader();
+    end
+    printClosedloopData(mpciter, u, x0, t_Elapsed);
+    switch exitflag
+        case -2
+        if ( iprint >= 1 && iprint < 10 )
+            fprintf(' Error F\n');
+        elseif ( iprint >= 10 )
+            fprintf(' Error: No feasible point was found\n')
+        end
+        case -1
+        if ( iprint >= 1 && iprint < 10 )
+            fprintf(' Error OT\n');
+        elseif ( iprint >= 10 )
+            fprintf([' Error: The output function terminated the',...
+                     ' algorithm\n'])
+        end
+        case 0
+        if ( iprint == 1 )
+            fprintf('\n');
+        elseif ( iprint >= 2 && iprint < 10 )
+            fprintf(' Warning IT\n');
+        elseif ( iprint >= 10 )
+            fprintf([' Warning: Number of iterations exceeded',...
+                     ' options.MaxIter or number of function',...
+                     ' evaluations exceeded options.FunEvals\n'])
+        end
+        case 1
+        if ( iprint == 1 )
+            fprintf('\n');
+        elseif ( iprint >= 2 && iprint < 10 )
+            fprintf(' \n');
+        elseif ( iprint >= 10 )
+            fprintf([' First-order optimality measure was less',...
+                     ' than options.TolFun, and maximum constraint',...
+                     ' violation was less than options.TolCon\n'])
+        end
+        case 2
+        if ( iprint == 1 )
+            fprintf('\n');
+        elseif ( iprint >= 2 && iprint < 10 )
+            fprintf(' Warning TX\n');
+        elseif ( iprint >= 10 )
+            fprintf(' Warning: Change in x was less than options.TolX\n')
+        end
+        case 3
+        if ( iprint == 1 )
+            fprintf('\n');
+        elseif ( iprint >= 2 && iprint < 10 )
+            fprintf(' Warning TJ\n');
+        elseif ( iprint >= 10 )
+            fprintf([' Warning: Change in the objective function',...
+                     ' value was less than options.TolFun\n'])
+        end
+        case 4
+        if ( iprint == 1 )
+            fprintf('\n');
+        elseif ( iprint >= 2 && iprint < 10 )
+            fprintf(' Warning S\n');
+        elseif ( iprint >= 10 )
+            fprintf([' Warning: Magnitude of the search direction',...
+                     ' was less than 2*options.TolX and constraint',...
+                     ' violation was less than options.TolCon\n'])
+        end
+        case 5
+        if ( iprint == 1 )
+            fprintf('\n');
+        elseif ( iprint >= 2 && iprint < 10 )
+            fprintf(' Warning D\n');
+        elseif ( iprint >= 10 )
+            fprintf([' Warning: Magnitude of directional derivative',...
+                     ' in search direction was less than',...
+                     ' 2*options.TolFun and maximum constraint',...
+                     ' violation was less than options.TolCon\n'])
+        end
+    end
+    if ( iprint >= 5 )
+    % NOTE: it simply plots the next state from the current x0 wich will be updated with each control point mpciter
+        plotTrajectories(system, T, t0, x0, u, param, linearisation, x_ref) 
+    end
+end
+
+
+
+% function [x, t_intermediate, x_intermediate] = dynamic(system, T, t0, x0, u, x_curr)
+% % t_intermediate, x_intermediate will be needed to plot the results
+%         x = system(t0, x0, u, T, x_curr);
+%         x_intermediate = [x0; x];
+%         t_intermediate = [t0, t0+T];
+% 
 % end

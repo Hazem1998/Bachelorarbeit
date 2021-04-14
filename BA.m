@@ -12,20 +12,23 @@ addpath functions;
 %% Model parameters
 l_r = 1.4;    % Distance from vehicle center of gravity to the rear in meters
 l_f = 1.4;    % Distance from vehicle center of gravity to the front in meters
-
+u_init = [0;0]; % from PAPER: starting with a non zero input results large deviation for far prediction
+param.distance = [l_r, l_f];
+param.input = u_init;
 
 %% Initializations
     tmeasure      = 0.0;
     xmeasure      = [0.0, 0.0, 0.0, 0.0];  % starts from equilibrium
     u0            = ones(2,N);  % this is initial guess
 %% reference trajectory
-x_ref = [transpose(1:100),zeros(100,2),5*ones(100,1)];
+x_ref = [transpose(1:mpciterations),zeros(mpciterations,2),5*ones(mpciterations,1)];
 
 %% Optimization
 
-    nmpc_me(@runningcosts, @terminalcosts, @constraints, ...
+    nmpc_me(@runningcosts, @constraints, ...
          @terminalconstraints, @linearconstraints, @system, ...
-         mpciterations, N, T, tmeasure, xmeasure, u0, x_ref,@Non_linear_system);
+         mpciterations, N, T, tmeasure, xmeasure, u0, x_ref,@Non_linear_system, ...
+            param, @discret_system_matrices, @printHeader, @printClosedloopData, @plotTrajectories);
 
     rmpath('./functions');
 
@@ -46,9 +49,6 @@ function cost = runningcosts(t, x, u, x_ref)
 
 end
 
-function cost = terminalcosts(t, x)
-    cost = 0.0;
-end
 
 function [c,ceq] = constraints(t, x, u)
     c   = [];
@@ -71,15 +71,14 @@ end
 
 
 
-function x_new = Non_linear_system(x, u)
+function x_new = Non_linear_system(x, u, param)
  %% Dynamics of the non linearized system: update current state but not for prediction
- [s,d,phi,v,a,delta] = curr_state_input(x, u);
+ [~,~,phi,v,a,delta] = curr_state_input(x, u);
  
- % CHANGE to be included as argin instead
- l_r = 1.4;
- l_f = 1.4;
+ l_r = param.distance(1);
+ l_f = param.distance(2);
  
-alpha = atan( (l_r* delta) / (l_f + l_r) );
+alpha = atan( (l_r* tan(delta) ) / (l_f + l_r) );
 s_new = v*cos(phi + alpha);
 d_new = v*sin(phi + alpha);
 phi_new = (v*sin(alpha)) / l_r;
@@ -91,25 +90,22 @@ x_new = [s_new,d_new,phi_new,v_new];
 end
 
 
- function y = system(t, x, u, T,x_curr)
- %% Dynamics of the system
- % initial input
- u_init = [0;0]; % from PAPER: starting with a non zero input results large deviation for far prediction
- 
-f = Non_linear_system(x_curr, u_init);    
-    
-[A_d, B_d] = discret_system_matrices(t, x, u, T);
+ function y = system(t, x, u, T, x_curr, param, linearisation)
+ %% Dynamics of the system 
+u_init = param.input;
+A_d = linearisation.A;
+B_d = linearisation.B;
+f = linearisation.f;
 
 y = x_curr + T*f + transpose(A_d*(x' - x_curr') + B_d*(u - u_init));
  end
  
- function [A_d, B_d] = discret_system_matrices(t, x, u, T)
+ function [A_d, B_d] = discret_system_matrices(t, x, u, T, param)
  %% Values taken from "Appendix A", the LINEARIZED AND DISCRETIZED SYSTEM MATRICES
- [s,d,phi,v,a,delta] = curr_state_input(x, u);
- 
-  % CHANGE
- l_r = 1.4;
- l_f = 1.4;
+ [~,~,phi,v,~,delta] = curr_state_input(x, u);
+
+ l_r = param.distance(1);
+ l_f = param.distance(2);
  
  
  z1 = phi + atan(l_r*tan(delta) / (l_r + l_f));
@@ -153,4 +149,36 @@ y = x_curr + T*f + transpose(A_d*(x' - x_curr') + B_d*(u - u_init));
  v = x(4);
  a = u(1);
  delta = u(2);
+ end
+
+ 
+ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+ %% OUTOUT %%
+ function printHeader()
+    fprintf('   k  |      a(k)        delta(k)        s        d        phi        v     Time\n');
+    fprintf('--------------------------------------------------------------------------------\n');
+end
+
+function printClosedloopData(mpciter, u, x, t_Elapsed)
+    fprintf(' %3d  | %+11.6f %+11.6f %+11.6f %+11.6f %+11.6f %+11.6f %+6.3f', ...
+             mpciter, u(1,1),u(2,1), x(1), x(2),x(3),x(4), t_Elapsed);
+end
+
+function plotTrajectories(system, T, t0, x0, u, param, linearisation, x_ref)
+                          
+    x = system(t0, x0, u, T, x0, param, linearisation);
+    
+    figure(1);
+        title('s/d closed loop trajectory');
+        xlabel('s');
+        ylabel('d');
+        grid on;
+        hold on;
+        plot(x_ref(:,1),x_ref(:,2),'o', ...
+        linspace(x_ref(1,1),x_ref(length(x_ref),1),100),linspace(x_ref(1,2),x_ref(length(x_ref),2), 100),'r')
+        plot(x(1),x(2),'or', ...
+             'MarkerFaceColor','r');
+        axis([-2 6 -3 3]);
+        axis square;
+
 end
