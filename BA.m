@@ -19,9 +19,9 @@ param.input = u_init;
 %% Initializations
     tmeasure      = 0.0;
     xmeasure      = [0.0, 0.0, 0.0, 0.0];  % starts from equilibrium
-    u0            = ones(2,N);  % this is initial guess
+    u0            = ones(2,N+1);  % this is initial guess
 %% reference trajectory
-x_ref = [transpose(1:mpciterations),zeros(mpciterations,2),5*ones(mpciterations,1)];
+x_ref = [transpose(1:mpciterations+N+1),zeros(mpciterations+N+1,2),5*ones(mpciterations+N+1,1)]; % CHange: x_ref starts from the next state after x0 needs to start at the same time
 
 %% Optimization
 

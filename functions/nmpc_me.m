@@ -166,7 +166,7 @@ function [t, x, u] = nmpc_me(runningcosts, ...
         [u_new, V_current, exitflag, output] = solveOptimalControlProblem ...
             (runningcosts, constraints, ...
             terminalconstraints, linearconstraints, system, ...
-            N, t0, x0, u0, T,tol_opt, options, x_ref(mpciter+1,:), param , linearisation);
+            N, t0, x0, u0, T,tol_opt, options, x_ref(mpciter+1:mpciter+N,:), param , linearisation);
         t_Elapsed = toc( t_Start );
         
         %   Print solution : I will check it later
@@ -232,10 +232,12 @@ function [u, V, exitflag, output] = solveOptimalControlProblem ...
 end
 
 function x = computeOpenloopSolution(system, N, T, t0, x0, u, param, linearisation)
+  %  u_init = param.input;
     x(1,:) = x0;
+   % x(2,:) = system(t0, x(1,:), u_init, T, x0, param, linearisation);
     for k=1:N
-        %x(k+1,:) = dynamic(system, T, t0, x(k,:), u(:,k), x0); %% remove ; to see the states of the system
-        x(k+1,:) = system(t0, x(k,:), u(:,k), T, x0, param, linearisation);
+        %x(k+1,:) = dynamic(system, T, t0, x(k,:), u(:,k), x0);
+        x(k+1,:) = system(t0, x(k,:), u(:,k), T, x0, param, linearisation);  % CHange u should be changed here!
                          
     end
 end
@@ -249,10 +251,11 @@ function cost = costfunction(runningcosts, system, ...
     cost = 0;
     x = zeros(N+1, length(x0));
     u_init = param.input;
-    x = computeOpenloopSolution(system, N, T, t0, x0, u, param, linearisation);
-    cost = runningcosts(t0+1*T, x(1,:), [u_init,u(:,1)], x_ref);
+    x = computeOpenloopSolution(system, N, T, t0, x0, u, param, linearisation);    
+   % cost = runningcosts(t0+1*T, x(2,:), [u_last,u_init], x_ref(1,:)); % CHange There is a mistake in the index of the input u(k-1) + needs to add u-1= the previous applied input      
+   cost = cost + runningcosts(t0+1*T, x(2,:), [u_init,u(:,1)], x_ref(1,:));  % k = 1
     for k=2:N
-        cost = cost+runningcosts(t0+k*T, x(k,:), u(:,k-1:k), x_ref); % changed to include u(k-1) and x_ref
+        cost = cost+runningcosts(t0+k*T, x(k+1,:), u(:,k-1:k), x_ref(k,:)); % changed to include u(k-1) and x_ref
     end
 end
 
