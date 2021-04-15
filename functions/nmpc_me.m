@@ -248,8 +248,9 @@ function cost = costfunction(runningcosts, system, ...
                     N, T, t0, x0, u, x_ref, param, linearisation)
     cost = 0;
     x = zeros(N+1, length(x0));
+    u_init = param.input;
     x = computeOpenloopSolution(system, N, T, t0, x0, u, param, linearisation);
-    cost = runningcosts(t0+1*T, x(1,:), [[1;1],u(:,1)], x_ref);
+    cost = runningcosts(t0+1*T, x(1,:), [u_init,u(:,1)], x_ref);
     for k=2:N
         cost = cost+runningcosts(t0+k*T, x(k,:), u(:,k-1:k), x_ref); % changed to include u(k-1) and x_ref
     end

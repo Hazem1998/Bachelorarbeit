@@ -45,7 +45,7 @@ function cost = runningcosts(t, x, u, x_ref)
 %% Running cost of the system
    u_curr = u(:,2);
    u_prev = u(:,1);
-    cost = norm(x-x_ref,2)+norm(u,2) + norm(u_curr-u_prev,2); % CHANGE = %dont forget to add the Q,R and S weight matrices (are they given as Input? / initialization?) //
+    cost = norm(x-x_ref,2)+norm(u_curr,2) + norm(u_curr-u_prev,2); % CHANGE = %dont forget to add the Q,R and S weight matrices (are they given as Input? / initialization?) //
 
 end
 
@@ -110,27 +110,27 @@ y = x_curr + T*f + transpose(A_d*(x' - x_curr') + B_d*(u - u_init));
  
  z1 = phi + atan(l_r*tan(delta) / (l_r + l_f));
  z2 = T*T*v*tan(delta); 
- z3 = (l_r*tan(delta))^2 / (l_r+l_f)^2;
+ z3 = ( (l_r*tan(delta)) / (l_r+l_f) )^2  + 1;
  z4 = (l_r + l_f)*sqrt(z3);
  z5 = (l_r + l_f)^3 * z3^(3/2);
  z6 = (l_r + l_f)*z3;
- z7 = v*(1 + tan(delta)^2 )*(1/z4 + (l_r*tan(delta)^2/z5) ) ;
+ z7 = v*(1 + tan(delta)^2 )*(1/z4 - ( (l_r*tan(delta))^2 / z5) ) ;
  z8 = T*l_r*v*(1 + tan(delta)^2 );
  
  
  A13 = -T*v*sin(z1);
- A14 = T*cos(z1) - z2*sin(z1)/2*z4;
+ A14 = T*cos(z1) - ( z2*sin(z1)/(2*z4) );
  A23 = T*v*cos(z1);
- A24 = T*sin(z1) + z2*cos(z1)/2*z4;
+ A24 = T*sin(z1) + ( z2*cos(z1)/(2*z4) );
  A34 = T*tan(delta)/z4;
  
 
  
  B = zeros(4,2);
  B(1,1) = T*T*cos(z1)/2;
- B(1,2) = -T*T*v*z7*sin(z1)/2 - z8*sin(z1)/z6;
+ B(1,2) = -T*T*v*z7*sin(z1)/2 - (z8*sin(z1)/z6);
  B(2,1) = T*T*sin(z1)/2;
- B(2,2) = T*T*v*z7*cos(z1)/2 + z8*cos(z1)/z6;
+ B(2,2) = T*T*v*z7*cos(z1)/2 + (z8*cos(z1)/z6);
  B(3,1) = T*T*tan(delta)/(2*z4);
  B(3,2) = T*z7;
  B(4,1) = T;
