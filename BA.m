@@ -5,8 +5,8 @@ close all;
 clear all;
 addpath functions;
 %% General
-    mpciterations = 5;     % How this was chosen?
-    N             = 20;     
+    mpciterations = 15;     % How this was chosen?
+    N             = 25;     
     T             = 0.1;    % Sampling interval
     
 %% Model parameters
@@ -21,7 +21,7 @@ param.input = u_init;
     xmeasure      = [0.0, 0.0, 0.0, 0.0];  % starts from equilibrium
     u0            = ones(2,N+1);  % this is initial guess
 %% reference trajectory
-x_ref = [transpose(1:mpciterations+N+1),zeros(mpciterations+N+1,2),5*ones(mpciterations+N+1,1)]; % CHange: x_ref starts from the next state after x0 needs to start at the same time
+x_ref = [transpose(0:mpciterations+N),zeros(mpciterations+N+1,2),5*ones(mpciterations+N+1,1)]; % CHange: x_ref starts from the next state after x0 needs to start at the same time
 
 %% Optimization
 
