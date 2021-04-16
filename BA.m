@@ -6,22 +6,25 @@ clear all;
 addpath functions;
 %% General
     mpciterations = 15;     % How this was chosen?
-    N             = 25;     
+    N             = 10;     
     T             = 0.1;    % Sampling interval
     
 %% Model parameters
-l_r = 1.4;    % Distance from vehicle center of gravity to the rear in meters
-l_f = 1.4;    % Distance from vehicle center of gravity to the front in meters
-u_init = [0;0]; % from PAPER: starting with a non zero input results large deviation for far prediction
+l_r = 2;    % Distance from vehicle center of gravity to the rear in meters
+l_f = 2;    % Distance from vehicle center of gravity to the front in meters
 param.distance = [l_r, l_f];
-param.input = u_init;
+% Weighting matrices
+param.Q = diag([0 0.25 0.2 10]);
+param.R = diag([0.33 5]);
+param.S = diag([0.33 15]);
+
 
 %% Initializations
     tmeasure      = 0.0;
-    xmeasure      = [0.0, 0.0, 0.0, 0.0];  % starts from equilibrium
+    xmeasure      = [0.0; 0.0; 0.0; 0.0];  % starts from equilibrium
     u0            = ones(2,N+1);  % this is initial guess
 %% reference trajectory
-x_ref = [transpose(0:mpciterations+N),zeros(mpciterations+N+1,2),5*ones(mpciterations+N+1,1)]; % CHange: x_ref starts from the next state after x0 needs to start at the same time
+x_ref = [0:mpciterations+N;zeros(2,mpciterations+N+1);5*ones(1,mpciterations+N+1)]; % CHange: x_ref starts from the next state after x0 needs to start at the same time
 
 %% Optimization
 
@@ -38,14 +41,17 @@ end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Definition of the NMPC functions
-% x=[s,d,phi,v] size(x) = 1 x 4 
+% x=[s;d;phi;v] size(x) = 4 x 1
 % u=[a;delta]   size(u) = 2 x N with N= Horizon
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-function cost = runningcosts(t, x, u, x_ref)
+function cost = runningcosts(t, x, u, x_ref,param)
 %% Running cost of the system
    u_curr = u(:,2);
    u_prev = u(:,1);
-    cost = norm(x-x_ref,2)+norm(u_curr,2) + norm(u_curr-u_prev,2); % CHANGE = %dont forget to add the Q,R and S weight matrices (are they given as Input? / initialization?) //
+   Q = param.Q;
+   S = param.S;
+   R = param.R;
+   cost = (x-x_ref).'*Q*(x-x_ref) + u_curr.'*R*(u_curr) + (u_curr-u_prev).'*S*(u_curr-u_prev);
 
 end
 
@@ -84,7 +90,7 @@ d_new = v*sin(phi + alpha);
 phi_new = (v*sin(alpha)) / l_r;
 v_new = a;
 
-x_new = [s_new,d_new,phi_new,v_new];
+x_new = [s_new;d_new;phi_new;v_new];
 
 
 end
@@ -92,12 +98,11 @@ end
 
  function y = system(t, x, u, T, x_curr, param, linearisation)
  %% Dynamics of the system 
-u_init = param.input;
 A_d = linearisation.A;
 B_d = linearisation.B;
 f = linearisation.f;
 
-y = x_curr + T*f + transpose(A_d*(x' - x_curr') + B_d*(u - u_init));
+y = x_curr + T*f + A_d*(x - x_curr) + B_d*u;
  end
  
  function [A_d, B_d] = discret_system_matrices(t, x, u, T, param)
@@ -174,8 +179,8 @@ function plotTrajectories(system, T, t0, x0, u, param, linearisation, x_ref)
         ylabel('d');
         grid on;
         hold on;
-        plot(x_ref(:,1),x_ref(:,2),'o', ...
-        linspace(x_ref(1,1),x_ref(length(x_ref),1),100),linspace(x_ref(1,2),x_ref(length(x_ref),2), 100),'r')
+        plot(x_ref(1,:),x_ref(2,:),'o', ...
+        linspace(x_ref(1,1),x_ref(1,length(x_ref)),100),linspace(x_ref(2,1),x_ref(2,length(x_ref)), 100),'r')
         plot(x(1),x(2),'or', ...
              'MarkerFaceColor','r');
         axis([-2 6 -3 3]);
