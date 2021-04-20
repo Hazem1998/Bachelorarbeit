@@ -5,9 +5,23 @@ close all;
 clear all;
 addpath functions;
 %% General
-    mpciterations = 15;     % How this was chosen?
-    N             = 10;     
+    mpciterations = 8;     % How this was chosen?
+    N             = 8;     
     T             = 0.1;    % Sampling interval
+    
+%% Non uniform parameters
+    steps = 2; % number of timescales (non uniform steps)
+    % Np_i : prediction = N/2 and Nc_i: control =mpciterations/2 =5
+    % N and mpciteration should be divided by steps 
+    % delta_ti propotional to 1/EValuei(A)
+    % Also N>mpciterations must hold!
+    delta_t = []
+    for i=1:steps
+        delta_t = [delta_t;T*i];
+    end
+    param.dt = delta_t;
+    param.steps = steps;
+    
     
 %% Model parameters
 l_r = 2;    % Distance from vehicle center of gravity to the rear in meters
@@ -44,15 +58,16 @@ end
 % x=[s;d;phi;v] size(x) = 4 x 1
 % u=[a;delta]   size(u) = 2 x N with N= Horizon
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-function cost = runningcosts(t, x, u, x_ref,param)
+%function cost = runningcosts(t, x, u, x_ref,param)
+function cost = runningcosts(t, x_diff, u,param)
 %% Running cost of the system
    u_curr = u(:,2);
    u_prev = u(:,1);
    Q = param.Q;
    S = param.S;
    R = param.R;
-   cost = (x-x_ref).'*Q*(x-x_ref) + u_curr.'*R*(u_curr) + (u_curr-u_prev).'*S*(u_curr-u_prev);
-
+  % cost = (x-x_ref).'*Q*(x-x_ref) + u_curr.'*R*(u_curr) + (u_curr-u_prev).'*S*(u_curr-u_prev);
+    cost = x_diff.'*Q*x_diff + u_curr.'*R*(u_curr) + (u_curr-u_prev).'*S*(u_curr-u_prev);
 end
 
 
@@ -187,3 +202,14 @@ function plotTrajectories(system, T, t0, x0, u, param, linearisation, x_ref)
         axis square;
 
 end
+
+
+
+
+
+
+
+
+
+
+
