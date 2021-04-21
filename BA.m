@@ -5,8 +5,8 @@ close all;
 clear all;
 addpath functions;
 %% General
-    mpciterations = 8;     % How this was chosen?
-    N             = 8;     
+    mpciterations = 20;     % How this was chosen?
+    N             = 10;     
     T             = 0.1;    % Sampling interval
     
 %% Non uniform parameters
@@ -15,9 +15,9 @@ addpath functions;
     % N and mpciteration should be divided by steps 
     % delta_ti propotional to 1/EValuei(A)
     % Also N>mpciterations must hold!
-    delta_t = []
+    delta_t = size(steps);
     for i=1:steps
-        delta_t = [delta_t;T*i];
+        delta_t(i) = T*i; % just an example of changing delta_t prop. to the timescale
     end
     param.dt = delta_t;
     param.steps = steps;
@@ -58,16 +58,16 @@ end
 % x=[s;d;phi;v] size(x) = 4 x 1
 % u=[a;delta]   size(u) = 2 x N with N= Horizon
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%function cost = runningcosts(t, x, u, x_ref,param)
-function cost = runningcosts(t, x_diff, u,param)
+function cost = runningcosts(t, x, u, x_ref,param)
+%function cost = runningcosts(t, x_diff, u,param)
 %% Running cost of the system
    u_curr = u(:,2);
    u_prev = u(:,1);
    Q = param.Q;
    S = param.S;
    R = param.R;
-  % cost = (x-x_ref).'*Q*(x-x_ref) + u_curr.'*R*(u_curr) + (u_curr-u_prev).'*S*(u_curr-u_prev);
-    cost = x_diff.'*Q*x_diff + u_curr.'*R*(u_curr) + (u_curr-u_prev).'*S*(u_curr-u_prev);
+   cost = (x-x_ref).'*Q*(x-x_ref) + u_curr.'*R*(u_curr) + (u_curr-u_prev).'*S*(u_curr-u_prev);
+   % cost = x_diff.'*Q*x_diff + u_curr.'*R*(u_curr) + (u_curr-u_prev).'*S*(u_curr-u_prev);
 end
 
 

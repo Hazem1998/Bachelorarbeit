@@ -166,7 +166,8 @@ function [t, x, u] = nmpc_me(runningcosts, ...
         [u_new, V_current, exitflag, output] = solveOptimalControlProblem ...
             (runningcosts, constraints, ...
             terminalconstraints, linearconstraints, system, ...
-            N, t0, x0, u0, T,tol_opt, options, x_ref(:,mpciter+1:mpciter+N+1), param , linearisation, u_last);
+            N, t0, x0, u0, T,tol_opt, options, x_ref(:,mpciter+1:mpciter+N+1), ...
+        param , linearisation, u_last, discret_system_matrices);
         t_Elapsed = toc( t_Start );
         
         %   Print solution : I will check it later
@@ -203,10 +204,11 @@ end
 
 function [u, V, exitflag, output] = solveOptimalControlProblem ...
     (runningcosts, constraints, terminalconstraints, ...
-    linearconstraints, system, N, t0, x0, u0, T, tol_opt, options, x_ref, param, linearisation, u_last)
+    linearconstraints, system, N, t0, x0, u0, T, tol_opt, ...
+    options, x_ref, param, linearisation, u_last, discret_system_matrices)
     x = zeros(length(x0), N+1);
   %  x = computeOpenloopSolution(system, N, T, t0, x0, u0, param, linearisation);
-    x = dynamics(system,T,N,x0,t0,u0, param, linearisation);
+    x = dynamics(system,discret_system_matrices,N,x0,t0,u0, param, linearisation);
     % Set control and linear bounds
     A = [];
     b = [];
@@ -228,7 +230,7 @@ function [u, V, exitflag, output] = solveOptimalControlProblem ...
     % Solve optimization problem
     [u, V, exitflag, output] = fmincon(@(u) costfunction(runningcosts, ...
         system, N, T, t0, x0, ...
-        u,x_ref,param, linearisation, u_last), u0, A, b, Aeq, beq, lb, ...
+        u,x_ref,param, linearisation, u_last, discret_system_matrices), u0, A, b, Aeq, beq, lb, ...
         ub, @(u) nonlinearconstraints(constraints, terminalconstraints, ...
         system, N, T, t0, x0, u, param, linearisation), options);
 end
@@ -236,7 +238,7 @@ end
 function x = computeOpenloopSolution(system, N, T, t0, x0, u, param, linearisation)
     x(:,1) = x0;
     for k=1:N
-        x(:,k+1) = system(t0, x(:,k), u(:,k), T, x0, param, linearisation);  % CHange u should be changed here!
+        x(:,k+1) = system(t0, x(:,k), u(:,k), T, x0, param, linearisation);  
                          
     end
 end
@@ -246,18 +248,19 @@ function u0 = shiftHorizon(u)
 end
 
 function cost = costfunction(runningcosts, system, ...
-                    N, T, t0, x0, u, x_ref, param, linearisation, u_last)
+                    N, T, t0, x0, u, x_ref, param, ...
+                    linearisation, u_last,discret_system_matrices)
     cost = 0;
     n = length(x0);
     x = zeros(n, N+1);
    % x = computeOpenloopSolution(system, N, T, t0, x0, u, param, linearisation); 
-   x = dynamics(system,T,N,x0,t0,u, param, linearisation); 
-   diff_X = diff_x(x0,x_ref(:,2),N,mpciterations,T,linearisation,param,u)
-   % cost = cost+ runningcosts(t0+1*T, x(:,2), [u_last,u(:,1)], x_ref(:,2), param); % K=0 in Matlab is k=1 and so u(-1) in Matlab u(0)=u_last
-   cost = cost+ runningcosts(t0+1*T, X_diff(1:n), [u_last,u(:,1)], param);
-    for k=1:(N-1)
-     %   cost = cost+runningcosts(t0+k*T, x(:,k+1), u(:,k-1:k), x_ref(:,k+1), param); % changed to include u(k-1) and x_ref
-        cost = cost+ runningcosts(t0+1*T, X_diff(k*n+1:(k+1)*n), [u_last,u(:,1)], param);
+   x = dynamics(system,discret_system_matrices,N,x0,t0,u, param, linearisation); 
+   %diff_X = diff_x(x0,x_ref(:,2),N,mpciterations,T,linearisation,param,u)
+    cost = cost+ runningcosts(t0+1*T, x(:,2), [u_last,u(:,1)], x_ref(:,2), param); % K=0 in Matlab is k=1 and so u(-1) in Matlab u(0)=u_last
+   %cost = cost+ runningcosts(t0+1*T, X_diff(1:n), [u_last,u(:,1)], param);
+    for k=2:(N-1)
+        cost = cost+runningcosts(t0+k*T, x(:,k+1), u(:,k-1:k), x_ref(:,k+1), param); % changed to include u(k-1) and x_ref
+     %   cost = cost+ runningcosts(t0+1*T, X_diff(k*n+1:(k+1)*n), [u_last,u(:,1)], param);
     end
 end
 
@@ -372,96 +375,37 @@ end
 %%%%%%  NON UNIFORM NPMC  %%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-function [A_i, B_i] = non_uniform_matrices(A,B,T,delta_t) 
+function [A_i, B_i] = non_uniform_matrices(A,B,delta_t) 
 %% calculate the dynamic matrices given time scale delta_t = t_{i} - t_{i-1}
 A_i = exp(A*delta_t);
 B_i = (exp(A*delta_t) - eye(length(A)))*inv(A); % This fomula works only if A is singular!
 B_i = B_i*B;
 end
 
-function Lambda = lambda(A,B,T,N,steps,delta_t)
-%% function that calculates the matrix Lambda eq(12)
 
-Np =  N/steps;  % length of timescale
-p=1;    % current timescale
-[A,~] = non_uniform_matrices(A,B,T,delta_t(p)); %A1
-Lambda = A;
-lambda_new = Lambda; % lambda(i-1)
-for i=2:N 
-    if (i>p*Np) % if timescale change
-       p = p+1;
-       [A,~] = non_uniform_matrices(A,B,T,delta_t(p)); % new Ai
-    end
-    
-    lambda_new = A*lambda_new;
-    Lambda = [Lambda;lambda_new]; % not lambda here the last one
-    
-end
-
-end
-
-function Tau= tau(A,B,T,N,mpciterations,steps,delta_t)
-%% calculate Tau in eq(12)
-
-% length of timescale
-Np =  N/steps; % prediction
-Nc = mpciterations/steps; % control
-p=1;
-c =1;
-[A,B] = non_uniform_matrices(A,B,T,delta_t(p)); % A1 and B1
-n   = size(A,1); % length of state vector x
-nu = size(B,2); %  length of input vector u
-
-Tau= zeros(n*N,nu*mpciterations);
-for j=1:mpciterations
-    for i=1:N
-    
-        if (i>p*Np) % update A if prediction timescale changes
-         p = p+1;
-         [A,~] = non_uniform_matrices(A,B,T,delta_t(p));
-        end 
-        
-        if (j>c*Nc) % update B if prediction timescale changes
-         c = c+1;
-         [~,B] = non_uniform_matrices(A,B,T,delta_t(c)); %CHANGE what is argin Np or Nc?
-        end         
-      
-%         if (i<j)
-%           TT(i,j) = zeros(n,nu); % A and B need to be defined  
-%           
-%         end
-        
-        if (i == j) % diagonal
-            Tau( (i-1)*n +1:n*i, (j-1)*nu +1:nu*j) = B;
-        end
-        
-        if(i>j)
-           Tau(( i-1)*n +1:n*i, (j-1)*nu +1:nu*j ) = A*TT((i-2)*n +1:n*(i-1), (j-1)*nu +1:nu*j); 
-        end
-        
-        
-    end    
-end
-
-end
-
-function X = dynamics(system, T, N, x0, t0, u0, linearisation)
-%% Calculate the state vector X from eq 12
+function X = dynamics(system, discret_system_matrices, N, x0, t0, u0, param, linearisation)
+%% Calculate the state vector X 
+% CHANGE size of x like the previous example
+% also you should use delta_t instead of T for the dynamics
+% discret_system_matrices(t, x, u, T, param)
 
 %parameters
-A = linearisation.A;
-B = linearisation.B;
+%A = linearisation.A;    % Matrix A for the 1st timescale (bicycle model)
+%B = linearisation.B;    % Matrix B for the 1st timescale
 delta_t = param.dt;
 steps = param.steps;
 
-
-X = [];
+X = x0;
 Np = N/steps; %length of prediction timescale
 for i=1:steps
+    % update timescale
+    T = delta_t(i);
     % update Ai and Bi
-    [A_i, B_i] = non_uniform_matrices(A,B,T,delta_t(i)); 
+    [A_i, B_i] = discret_system_matrices(t0, x0, [0;0], T, param);
+    %[A_i, B_i] = non_uniform_matrices(A,B,delta_t(i)); 
     linearisation.A = A_i;
     linearisation.B = B_i;
+    
     % Calculate timescale corresponding state vecor
     xi = computeOpenloopSolution(system, Np, T, t0, x0, u0, param, linearisation);
     % update parameters
@@ -469,54 +413,123 @@ for i=1:steps
     xi = xi(:,2:Np+1); % remove x(:,1)=x0
     %Np = Np*(i+1);
     % Concatenate new vectors
-    xi = reshape(xi,[],1);
-    X = [X;xi]; % change xi is not a vector
-
+   % xi = reshape(xi,[],1);
+    X = [X,xi]; % change xi is not a vector
+     
 end
 
 end
 
-function Xs = steady_state(A,B,T,xs,N,mpciterations)
-%% Xs-tilde from eq 13
-% Change: I am not sure I am calcuating it right
-Np1= N/steps; % =4
-Nc = mpciterations; %=8
-[A1, ~] = non_uniform_matrices(A,B,T,delta_t(1));
-Xs = [];
-for i=1:steps
+% function Xs = steady_state(A,B,T,xs,N,mpciterations)
+% %% Xs-tilde from eq 13
+% % Change: I am not sure I am calcuating it right
+% Np1= N/steps; % =4
+% Nc = mpciterations; %=8
+% [A1, ~] = non_uniform_matrices(A,B,T,delta_t(1));
+% Xs = [];
+% for i=1:steps
+% 
+%     for j=1:Np1
+%         if (i == 1)
+%             if (j<Np1)
+%                 Xs_new = xs;
+%             else
+%                 Xs_new = A1*xs;
+%             end
+%         end
+%         Xs = [Xs;Xs_new]
+%     end   
+% end
+% 
+% 
+% end
+% 
+% function diff_X = diff_x(x0,xs,N,mpciterations,T,linearisation,param,u)
+% %% eq(12)
+% 
+% % NMPC parameters
+% A = linearisation.A;
+% B = linearisation.B;
+% delta_t = param.dt;
+% steps = param.steps;
+% 
+% Xs = steady_state(A,B,T,xs,N,mpciterations); % Xs-tilde
+% Tau= tau(A,B,T,N,mpciterations,steps,delta_t);
+% Lambda = lambda(A,B,T,N,steps,delta_t);
+% 
+% U = reshape (u,[],1); % U is vector of all inputs
+% diff_X = Lambda*x0 + Tau*U - Xs;
+% 
+% end
 
-    for j=1:Np1
-        if (i == 1)
-            if (j<Np1)
-                Xs_new = xs;
-            else
-                Xs_new = A1*xs;
-            end
-        end
-        Xs = [Xs;Xs_new]
-    end   
-end
+% function Lambda = lambda(A,B,T,N,steps,delta_t)
+% %% function that calculates the matrix Lambda eq(12)
+% 
+% Np =  N/steps;  % length of timescale
+% p=1;    % current timescale
+% [A,~] = non_uniform_matrices(A,B,T,delta_t(p)); %A1
+% Lambda = A;
+% lambda_new = Lambda; % lambda(i-1)
+% for i=2:N 
+%     if (i>p*Np) % if timescale change
+%        p = p+1;
+%        [A,~] = non_uniform_matrices(A,B,T,delta_t(p)); % new Ai
+%     end
+%     
+%     lambda_new = A*lambda_new;
+%     Lambda = [Lambda;lambda_new]; % not lambda here the last one
+%     
+% end
+% 
+% end
+% 
+% function Tau= tau(A,B,T,N,mpciterations,steps,delta_t)
+% %% calculate Tau in eq(12)
+% 
+% % length of timescale
+% Np =  N/steps; % prediction
+% Nc = mpciterations/steps; % control
+% p=1;
+% c =1;
+% [A,B] = non_uniform_matrices(A,B,T,delta_t(p)); % A1 and B1
+% n   = size(A,1); % length of state vector x
+% nu = size(B,2); %  length of input vector u
+% 
+% Tau= zeros(n*N,nu*mpciterations);
+% for j=1:mpciterations
+%     for i=1:N
+%     
+%         if (i>p*Np) % update A if prediction timescale changes
+%          p = p+1;
+%          [A,~] = non_uniform_matrices(A,B,T,delta_t(p));
+%         end 
+%         
+%         if (j>c*Nc) % update B if prediction timescale changes
+%          c = c+1;
+%          [~,B] = non_uniform_matrices(A,B,T,delta_t(c)); %CHANGE what is argin Np or Nc?
+%         end         
+%       
+% %         if (i<j)
+% %           TT(i,j) = zeros(n,nu); % A and B need to be defined  
+% %           
+% %         end
+%         
+%         if (i == j) % diagonal
+%             Tau( (i-1)*n +1:n*i, (j-1)*nu +1:nu*j) = B;
+%         end
+%         
+%         if(i>j)
+%            Tau(( i-1)*n +1:n*i, (j-1)*nu +1:nu*j ) = A*TT((i-2)*n +1:n*(i-1), (j-1)*nu +1:nu*j); 
+%         end
+%         
+%         
+%     end    
+% end
+% 
+% end
 
 
-end
-
-function diff_X = diff_x(x0,xs,N,mpciterations,T,linearisation,param,u)
-%% eq(12)
-
-% NMPC parameters
-A = linearisation.A;
-B = linearisation.B;
-delta_t = param.dt;
-steps = param.steps;
-
-Xs = steady_state(A,B,T,xs,N,mpciterations); % Xs-tilde
-Tau= tau(A,B,T,N,mpciterations,steps,delta_t);
-Lambda = lambda(A,B,T,N,steps,delta_t);
-
-U = reshape (u,[],1); % U is vector of all inputs
-diff_X = Lambda*x0 + Tau*U - Xs;
-
-end
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
 % function [x, t_intermediate, x_intermediate] = dynamic(system, T, t0, x0, u, x_curr)
