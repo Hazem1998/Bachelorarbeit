@@ -1,9 +1,10 @@
 function [t, x, u] = nmpc_me(runningcosts, ...
               constraints, terminalconstraints, ...
               linearconstraints, system, ...
-              mpciterations, N, T, tmeasure, xmeasure, u0, x_ref, ...
+              mpciterations, N, T, tmeasure, xmeasure, u0, x_ref,xp_measure, ...
               Non_linear_system, param, discret_system_matrices, ...
-              printHeader, printClosedloopData, plotTrajectories)
+              printHeader, printClosedloopData, plotTrajectories, ...
+              Pedest_prediction, Pedest_dynamics)
 
 % Computes the closed loop solution for the NMPC problem defined by
 % the functions
@@ -145,7 +146,15 @@ function [t, x, u] = nmpc_me(runningcosts, ...
     t = []; % Will be used to plot the results
     x = [];
     u = [];
+    xp = []; % position of pedestrian
     u_last = [0;0]; % Applied input of the previous time step
+    
+    
+    %%%%
+    delta_t = param.dt;
+    steps = param.steps;
+    %%%%
+    
     % Start of the NMPC iteration
     mpciter = 0;
     while(mpciter < mpciterations)
@@ -154,12 +163,50 @@ function [t, x, u] = nmpc_me(runningcosts, ...
         t0 = tmeasure;
         x0 = xmeasure;
         
-        f = Non_linear_system(x0, [0;0], param);    
-        [A_d, B_d] = discret_system_matrices(t, x0, [0;0], T, param);
-        linearisation.A = A_d;
-        linearisation.B = B_d;
-        linearisation.f = f;
+        %%%
+        % Compute all matrices of the dynamics for different timescales
+        Ac = cell(steps);       
+        Bc = cell(steps);
+        %fc = cell(steps); % No need for this as f is same for all
+        %timescales
         
+        for i=1:steps
+            % update timescale
+            T = delta_t(i);
+            % update Ai and Bi
+            [A_i, B_i] = discret_system_matrices(t0, x0, [0;0], T, param);
+            % Add the new matrices to a new cell
+            Ac{i} = A_i;
+            Bc{i} = B_i;
+        end
+            linear.A = Ac;
+            linear.B = Bc;
+        %%%%%%
+          f = Non_linear_system(x0, [0;0], param);  
+          linear.f = f;
+        %%% Dynamics for First timescale used to
+                %update the current state after prediction)
+                % compute the constraints 
+        linearisation.A = Ac{1};
+        linearisation.B = Bc{1};
+        linearisation.f = f;
+ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % Predict Pedesterian path
+    Lane = param.Lane;
+    xp0 = xp_measure;
+    Xp = Pedest_prediction(T,xp0,N);
+    
+    % Check if Pedestrian is near the crossing
+    s_break = 0; % 
+    if (any(Xp(2,:)>= (Lane(1)-param.safety)))&&(any(Xp(2,:)<= (Lane(2)+param.safety)))
+        s_break = param.s_break;
+    end
+    
+    % Update Pedestrian position   
+     xp = [ xp; xp_measure ];
+    [xp_measure,~] = Pedest_dynamics(xp0, T);
+ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%5
+ 
         % Step (2) of the NMPC algorithm:
         %   Solve the optimal control problem
         t_Start = tic;
@@ -167,16 +214,19 @@ function [t, x, u] = nmpc_me(runningcosts, ...
             (runningcosts, constraints, ...
             terminalconstraints, linearconstraints, system, ...
             N, t0, x0, u0, T,tol_opt, options, x_ref(:,mpciter+1:mpciter+N+1), ...
-        param , linearisation, u_last, discret_system_matrices);
+        param , linear, u_last,linearisation,s_break);
         t_Elapsed = toc( t_Start );
+        
+        % compute the predicted trajectory of the car
+        x_pred = dynamics(system,N,x0,t0,u_new, param, linear);
         
         %   Print solution : I will check it later
         
         if ( iprint >= 1 )
-            printSolution(system, printHeader, printClosedloopData, ...
+            printSolution(printHeader, printClosedloopData, ...
                           plotTrajectories, mpciter, T, t0, x0, u_new, ...
                           iprint, ...
-                          exitflag, output, t_Elapsed, param, linearisation, x_ref);
+                          exitflag, output, t_Elapsed, param, linear, x_ref,x_pred, xp0, Xp);
         end
 
 
@@ -205,10 +255,10 @@ end
 function [u, V, exitflag, output] = solveOptimalControlProblem ...
     (runningcosts, constraints, terminalconstraints, ...
     linearconstraints, system, N, t0, x0, u0, T, tol_opt, ...
-    options, x_ref, param, linearisation, u_last, discret_system_matrices)
+    options, x_ref, param, linear, u_last,linearisation,x_break)
     x = zeros(length(x0), N+1);
   %  x = computeOpenloopSolution(system, N, T, t0, x0, u0, param, linearisation);
-    x = dynamics(system,discret_system_matrices,N,x0,t0,u0, param, linearisation);
+    x = dynamics(system,N,x0,t0,u0, param, linear);
     % Set control and linear bounds
     A = [];
     b = [];
@@ -230,9 +280,9 @@ function [u, V, exitflag, output] = solveOptimalControlProblem ...
     % Solve optimization problem
     [u, V, exitflag, output] = fmincon(@(u) costfunction(runningcosts, ...
         system, N, T, t0, x0, ...
-        u,x_ref,param, linearisation, u_last, discret_system_matrices), u0, A, b, Aeq, beq, lb, ...
+        u,x_ref,param, linear, u_last), u0, A, b, Aeq, beq, lb, ...
         ub, @(u) nonlinearconstraints(constraints, terminalconstraints, ...
-        system, N, T, t0, x0, u, param, linearisation), options);
+        system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear), options);
 end
 
 function x = computeOpenloopSolution(system, N, T, t0, x0, u, param, linearisation)
@@ -249,30 +299,30 @@ end
 
 function cost = costfunction(runningcosts, system, ...
                     N, T, t0, x0, u, x_ref, param, ...
-                    linearisation, u_last,discret_system_matrices)
+                    linear, u_last)
     cost = 0;
     n = length(x0);
     x = zeros(n, N+1);
-   % x = computeOpenloopSolution(system, N, T, t0, x0, u, param, linearisation); 
-   x = dynamics(system,discret_system_matrices,N,x0,t0,u, param, linearisation); 
-   %diff_X = diff_x(x0,x_ref(:,2),N,mpciterations,T,linearisation,param,u)
+    % x = computeOpenloopSolution(system, N, T, t0, x0, u, param, linearisation); 
+    x = dynamics(system,N,x0,t0,u, param, linear); 
     cost = cost+ runningcosts(t0+1*T, x(:,2), [u_last,u(:,1)], x_ref(:,2), param); % K=0 in Matlab is k=1 and so u(-1) in Matlab u(0)=u_last
-   %cost = cost+ runningcosts(t0+1*T, X_diff(1:n), [u_last,u(:,1)], param);
     for k=2:(N-1)
         cost = cost+runningcosts(t0+k*T, x(:,k+1), u(:,k-1:k), x_ref(:,k+1), param); % changed to include u(k-1) and x_ref
-     %   cost = cost+ runningcosts(t0+1*T, X_diff(k*n+1:(k+1)*n), [u_last,u(:,1)], param);
     end
 end
 
 function [c,ceq] = nonlinearconstraints(constraints, ...
     terminalconstraints, system, ...
-    N, T, t0, x0, u, param, linearisation)
+    N, T, t0, x0, u, param, linearisation,x_ref, x_break,linear)
     x = zeros(N+1, length(x0));
-    x = computeOpenloopSolution(system, N, T, t0, x0, u, param, linearisation);
+    %x = computeOpenloopSolution(system, N, T, t0, x0, u, param, linearisation);
+    %%%%%%%%
+    x = dynamics(system,N,x0,t0,u, param, linear);
+    %%%%%%%
     c = [];
     ceq = [];
     for k=1:N
-        [cnew, ceqnew] = constraints(t0+k*T,x(:,k),u(:,k));
+        [cnew, ceqnew] = constraints(t0+k*T,x(:,k),u(:,k),x_ref, x_break, param);
         c = [c cnew];
         ceq = [ceq ceqnew];
     end
@@ -285,9 +335,9 @@ end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%% OUTPUT %%%%%%%%%%%%%
-function printSolution(system, printHeader, printClosedloopData, ...
+function printSolution(printHeader, printClosedloopData, ...
              plotTrajectories, mpciter, T, t0, x0, u, iprint, exitflag, output, t_Elapsed, ...
-             param, linearisation, x_ref)
+             param, linear, x_ref, x, xp0, Xp)
     if (mpciter == 0)
         printHeader();
     end
@@ -367,167 +417,45 @@ function printSolution(system, printHeader, printClosedloopData, ...
     end
     if ( iprint >= 5 )
     % NOTE: it simply plots the next state from the current x0 wich will be updated with each control point mpciter
-        plotTrajectories(system, T, t0, x0, u, param, linearisation, x_ref) 
+        plotTrajectories(x, T, t0, x0, u, param, linear, x_ref, xp0, Xp) 
     end
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%  NON UNIFORM NPMC  %%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-function [A_i, B_i] = non_uniform_matrices(A,B,delta_t) 
-%% calculate the dynamic matrices given time scale delta_t = t_{i} - t_{i-1}
-A_i = exp(A*delta_t);
-B_i = (exp(A*delta_t) - eye(length(A)))*inv(A); % This fomula works only if A is singular!
-B_i = B_i*B;
-end
-
-
-function X = dynamics(system, discret_system_matrices, N, x0, t0, u0, param, linearisation)
+function X = dynamics(system, N, x0, t0, u0, param, linear)
 %% Calculate the state vector X 
-% CHANGE size of x like the previous example
-% also you should use delta_t instead of T for the dynamics
-% discret_system_matrices(t, x, u, T, param)
+% Compute the state vector x by Concatenating all state vectors
+% corresponding to different timescales
 
 %parameters
-%A = linearisation.A;    % Matrix A for the 1st timescale (bicycle model)
-%B = linearisation.B;    % Matrix B for the 1st timescale
+Ac = linear.A;    % Matrix A for the 1st timescale (bicycle model)
+Bc = linear.B;    % Matrix B for the 1st timescale
 delta_t = param.dt;
 steps = param.steps;
-
+linearisation.f = linear.f;
 X = x0;
 Np = N/steps; %length of prediction timescale
 for i=1:steps
     % update timescale
     T = delta_t(i);
     % update Ai and Bi
-    [A_i, B_i] = discret_system_matrices(t0, x0, [0;0], T, param);
-    %[A_i, B_i] = non_uniform_matrices(A,B,delta_t(i)); 
-    linearisation.A = A_i;
-    linearisation.B = B_i;
+    linearisation.A = Ac{i};
+    linearisation.B = Bc{i};
     
     % Calculate timescale corresponding state vecor
     xi = computeOpenloopSolution(system, Np, T, t0, x0, u0, param, linearisation);
     % update parameters
     x0 = xi(:,Np+1); 
     xi = xi(:,2:Np+1); % remove x(:,1)=x0
-    %Np = Np*(i+1);
+    %Np = Np*(i+1); % this is wrong as Np is the same for all timescales
     % Concatenate new vectors
-   % xi = reshape(xi,[],1);
-    X = [X,xi]; % change xi is not a vector
+    X = [X,xi];
      
 end
 
 end
-
-% function Xs = steady_state(A,B,T,xs,N,mpciterations)
-% %% Xs-tilde from eq 13
-% % Change: I am not sure I am calcuating it right
-% Np1= N/steps; % =4
-% Nc = mpciterations; %=8
-% [A1, ~] = non_uniform_matrices(A,B,T,delta_t(1));
-% Xs = [];
-% for i=1:steps
-% 
-%     for j=1:Np1
-%         if (i == 1)
-%             if (j<Np1)
-%                 Xs_new = xs;
-%             else
-%                 Xs_new = A1*xs;
-%             end
-%         end
-%         Xs = [Xs;Xs_new]
-%     end   
-% end
-% 
-% 
-% end
-% 
-% function diff_X = diff_x(x0,xs,N,mpciterations,T,linearisation,param,u)
-% %% eq(12)
-% 
-% % NMPC parameters
-% A = linearisation.A;
-% B = linearisation.B;
-% delta_t = param.dt;
-% steps = param.steps;
-% 
-% Xs = steady_state(A,B,T,xs,N,mpciterations); % Xs-tilde
-% Tau= tau(A,B,T,N,mpciterations,steps,delta_t);
-% Lambda = lambda(A,B,T,N,steps,delta_t);
-% 
-% U = reshape (u,[],1); % U is vector of all inputs
-% diff_X = Lambda*x0 + Tau*U - Xs;
-% 
-% end
-
-% function Lambda = lambda(A,B,T,N,steps,delta_t)
-% %% function that calculates the matrix Lambda eq(12)
-% 
-% Np =  N/steps;  % length of timescale
-% p=1;    % current timescale
-% [A,~] = non_uniform_matrices(A,B,T,delta_t(p)); %A1
-% Lambda = A;
-% lambda_new = Lambda; % lambda(i-1)
-% for i=2:N 
-%     if (i>p*Np) % if timescale change
-%        p = p+1;
-%        [A,~] = non_uniform_matrices(A,B,T,delta_t(p)); % new Ai
-%     end
-%     
-%     lambda_new = A*lambda_new;
-%     Lambda = [Lambda;lambda_new]; % not lambda here the last one
-%     
-% end
-% 
-% end
-% 
-% function Tau= tau(A,B,T,N,mpciterations,steps,delta_t)
-% %% calculate Tau in eq(12)
-% 
-% % length of timescale
-% Np =  N/steps; % prediction
-% Nc = mpciterations/steps; % control
-% p=1;
-% c =1;
-% [A,B] = non_uniform_matrices(A,B,T,delta_t(p)); % A1 and B1
-% n   = size(A,1); % length of state vector x
-% nu = size(B,2); %  length of input vector u
-% 
-% Tau= zeros(n*N,nu*mpciterations);
-% for j=1:mpciterations
-%     for i=1:N
-%     
-%         if (i>p*Np) % update A if prediction timescale changes
-%          p = p+1;
-%          [A,~] = non_uniform_matrices(A,B,T,delta_t(p));
-%         end 
-%         
-%         if (j>c*Nc) % update B if prediction timescale changes
-%          c = c+1;
-%          [~,B] = non_uniform_matrices(A,B,T,delta_t(c)); %CHANGE what is argin Np or Nc?
-%         end         
-%       
-% %         if (i<j)
-% %           TT(i,j) = zeros(n,nu); % A and B need to be defined  
-% %           
-% %         end
-%         
-%         if (i == j) % diagonal
-%             Tau( (i-1)*n +1:n*i, (j-1)*nu +1:nu*j) = B;
-%         end
-%         
-%         if(i>j)
-%            Tau(( i-1)*n +1:n*i, (j-1)*nu +1:nu*j ) = A*TT((i-2)*n +1:n*(i-1), (j-1)*nu +1:nu*j); 
-%         end
-%         
-%         
-%     end    
-% end
-% 
-% end
-
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
