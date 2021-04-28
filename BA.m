@@ -5,7 +5,7 @@ close all;
 clear all;
 addpath functions;
 %% General
-    mpciterations = 50;     % How this was chosen?
+    mpciterations = 40;     % How this was chosen?
     N             = 10;     
     T             = 0.1;    % Sampling interval
     
@@ -46,7 +46,7 @@ param.s_break = 3;    % threshhold distance for the car to start breaking
 %% Initializations
     tmeasure      = 0.0;
     xmeasure      = [0.0; 0.0; 0.0; 0.0];  % starts from equilibrium
-    u0            = ones(2,N+1);  % this is initial guess
+    u0            = ones(2,N);  % this is initial guess
     xp_measure = [26;-2;0;1.5];    % initial position of pedestrian
 %% reference trajectory
 x_ref = [0:mpciterations+N;zeros(2,mpciterations+N+1);13*ones(1,mpciterations+N+1)]; % CHange: x_ref starts from the next state after x0 needs to start at the same time
@@ -54,7 +54,7 @@ x_ref = [0:mpciterations+N;zeros(2,mpciterations+N+1);13*ones(1,mpciterations+N+
 %% Optimization
 
     nmpc_me(@runningcosts, @constraints, ...
-         @terminalconstraints, @linearconstraints, @system, ...
+          @linearconstraints, @system, ...
          mpciterations, N, T, tmeasure, xmeasure, u0, x_ref,xp_measure,@Non_linear_system, ...
             param, @discret_system_matrices, @printHeader, @printClosedloopData, @plotTrajectories, ...
         @Pedest_prediction, @Pedest_dynamics);
@@ -81,7 +81,7 @@ function cost = runningcosts(t, x, u, x_ref,param)
 end
 
 
-function [c,ceq] = constraints(t, x, u, x_ref, s_break, param)
+function [c,ceq] = constraints(t, x, x_ref, s_break, param)
 %% Non linear constraints
     % Staying in lane conditions
     w_lane = param.dev; 
@@ -103,11 +103,6 @@ function [c,ceq] = constraints(t, x, u, x_ref, s_break, param)
     ceq = [];
 end
 
-function [c,ceq] = terminalconstraints(t, x)
-    c   = [];
-    ceq = [];
-end
-
 function [A, b, Aeq, beq, lb, ub] = linearconstraints(t, x, u)
     A   = [];
     b   = [];
@@ -126,13 +121,13 @@ function x_new = Non_linear_system(x, u, param)
  l_r = param.distance(1);
  l_f = param.distance(2);
  
-alpha = atan( (l_r* tan(delta) ) / (l_f + l_r) );
-s_new = v*cos(phi + alpha);
-d_new = v*sin(phi + alpha);
-phi_new = (v*sin(alpha)) / l_r;
-v_new = a;
+ alpha = atan( (l_r* tan(delta) ) / (l_f + l_r) );
+ s_new = v*cos(phi + alpha);
+ d_new = v*sin(phi + alpha);
+ phi_new = (v*sin(alpha)) / l_r;
+ v_new = a;
 
-x_new = [s_new;d_new;phi_new;v_new];
+ x_new = [s_new;d_new;phi_new;v_new];
 
 
 end
@@ -140,11 +135,11 @@ end
 
  function y = system(t, x, u, T, x_curr, param, linearisation)
  %% Dynamics of the system 
-A_d = linearisation.A;
-B_d = linearisation.B;
-f = linearisation.f;
+    A_d = linearisation.A;
+    B_d = linearisation.B;
+    f = linearisation.f;
 
-y = x_curr + T*f + A_d*(x - x_curr) + B_d*u;
+    y = x_curr + T*f + A_d*(x - x_curr) + B_d*u;
  end
  
  function [A_d, B_d] = discret_system_matrices(t, x, u, T, param)
@@ -211,7 +206,7 @@ function printClosedloopData(mpciter, u, x, t_Elapsed)
              mpciter, u(1,1),u(2,1), x(1), x(2),x(3),x(4), t_Elapsed);
 end
 
-function plotTrajectories( x, T, t0, x0, u, param, linear, x_ref, xp0, Xp)           
+function plotTrajectories( x, x0, param, x_ref, xp0, Xp)           
 %% Plot current frame
     l_r = param.distance(1);
     l_f = param.distance(2);
@@ -274,15 +269,16 @@ end
 function [y, y_nmpc] = Pedest_dynamics(xp,T)
 %% Pedestrian dynamics
 
-F = [1 0 T 0; 0 1 0 T; 0 0 1 0; 0 0 0 1];
-t = (T^2)/2;
-G = [t 0;0 t; T 0; 0 T];
-% Prediction of the pedestrian next movement
-y_nmpc = F*xp;
+    F = [1 0 T 0; 0 1 0 T; 0 0 1 0; 0 0 0 1];
+    t = (T^2)/2;
+    %G = [t 0;0 t; T 0; 0 T];
+    G = [0 0;0 t; 0 0; 0 T];    % no noise on the longitudinal input
+    % Prediction of the pedestrian next movement
+    y_nmpc = F*xp;
 
-% Actual movement with Gaussian Noise
-w = randn(2,1);
-y = y_nmpc + G*w;
+    % Actual movement with Gaussian Noise
+    w = randn(2,1);
+    y = y_nmpc + G*w;
 
 end
 
