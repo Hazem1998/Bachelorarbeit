@@ -81,7 +81,7 @@ function cost = runningcosts(t, x, u, x_ref,param)
 end
 
 
-function [c,ceq] = constraints(t, x, x_ref, s_break, param)
+function [c,ceq] = constraints(t, x, x_ref, s_break, param, Crosses, stop)
 %% Non linear constraints
     % Staying in lane conditions
     w_lane = param.dev; 
@@ -89,17 +89,34 @@ function [c,ceq] = constraints(t, x, x_ref, s_break, param)
     L2 = x(2)-x_ref(2)-w_lane;
     
     % velocity conditions
-    vmax = x(4)-x_ref(4);
+    vmax = x(4)-x_ref(4); % 13 m/s = 50km/h
     v_positive = -x(4);
     
     % physical constraints
-    c   = [L1;L2;vmax;v_positive];
+    c   = [L1;L2;vmax;v_positive;-1]; % to maintain the size of the vector c: the constraint -1<0 always hold
+    
+    if (Crosses == 1) % at predicted step the pedestrian is crossing
+        xp_lim = param.crossing;
+        
+        % if the car is stopping before the crossing
+        if (stop ==1)
+            c(end) = x(1)- xp_lim(1) 
+        end
+        
+        % if the car is accelerating
+        if (stop ==0)
+            c(end) = x(1)+ xp_lim(2)
+        end
+            
+    end
+    
+    
     
     % pedestrian safety constraints
-    if (s_break~=0)
-        xp_lim = param.crossing;
-        c = [c;x(1)- xp_lim(1)+s_break];
-    end
+%     if (s_break~=0)
+%         xp_lim = param.crossing;
+%         c = [c;x(1)- xp_lim(1)+s_break];    % Change: the size sometimes increases, but it increases for the whole mpciteration here not just the treated prediction 
+%     end
     ceq = [];
 end
 
@@ -258,7 +275,7 @@ function plotTrajectories( x, x0, param, x_ref, xp0, Xp)
        % Plot the actual trajectory of the car
         plot(C(:,1)+x0(1)-L/2,C(:,2)+x0(2)-B/2,'b')
         
-        axis([-2 30 -3 7]);
+        axis([-2 30 -5 7]);
         pause(1)
         close   % used to update each frame      
 end
