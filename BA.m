@@ -100,12 +100,12 @@ function [c,ceq] = constraints(t, x, x_ref, s_break, param, Crosses, stop)
         
         % if the car is stopping before the crossing
         if (stop ==1)
-            c(end) = x(1)- xp_lim(1) 
+            c(end) = x(1)- xp_lim(1); 
         end
         
         % if the car is accelerating
         if (stop ==0)
-            c(end) = x(1)+ xp_lim(2)
+            c(end) = x(1)+ xp_lim(2);
         end
             
     end
