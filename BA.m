@@ -6,15 +6,15 @@ clear all;
 addpath functions;
 %% General
     mpciterations = 40;     % How this was chosen?
-    N             = 10;     
+    N             = 12;     
     T             = 0.1;    % Sampling interval
     
 %% Non uniform parameters
-    steps = 2; % number of timescales (non uniform steps)
+    steps = 3; % number of timescales (non uniform steps)
     % Np_i : prediction = N/2 and Nc_i: control =mpciterations/2 =5
     % N and mpciteration should be divided by steps 
     % delta_ti propotional to 1/EValuei(A)
-    % Also N>mpciterations must hold!
+    % Also N<mpciterations must hold!
     delta_t = size(steps);
     for i=1:steps
         delta_t(i) = T*i; % just an example of changing delta_t prop. to the timescale
@@ -39,15 +39,15 @@ param.Lane = [-1.5,5];
 param.dev = 1; % distance the car is allowed to diviate from the reference trajectory
 
 % Safety parameters in case of pedestrian crossing
-param.crossing = [25,27]; % pedestrian crossing coordinates
+param.crossing = [10,12]; % pedestrian crossing coordinates
 param.safety = 1; % distance of pedestrian from lane to consider stopping
 param.s_break = 3;    % threshhold distance for the car to start breaking 
 
 %% Initializations
     tmeasure      = 0.0;
-    xmeasure      = [0.0; 0.0; 0.0; 0.0];  % starts from equilibrium
+    xmeasure      = [0.0; 0.0; 0.0; 5];  % starts from equilibrium
     u0            = ones(2,N);  % this is initial guess
-    xp_measure = [26;-2;0;1.5];    % initial position of pedestrian
+    xp_measure = [11;-4;0;1.5];    % initial position of pedestrian
 %% reference trajectory
 x_ref = [0:mpciterations+N;zeros(2,mpciterations+N+1);13*ones(1,mpciterations+N+1)]; % CHange: x_ref starts from the next state after x0 needs to start at the same time
 
@@ -105,7 +105,8 @@ function [c,ceq] = constraints(t, x, x_ref, s_break, param, Crosses, stop)
         
         % if the car is accelerating
         if (stop ==0)
-            c(end) = x(1)+ xp_lim(2);
+            %c(end) = x(1)- xp_lim(1); 
+            c(end) = -x(1)+ xp_lim(2);
         end
             
     end
@@ -304,7 +305,7 @@ function Xp = Pedest_prediction(T,xp0,N)
     Xp(:,1) = xp0;
     for k=1:N
        [~,yp]  = Pedest_dynamics(Xp(:,k),T);  
-        Xp(:,k+1)= yp;                 
+        Xp(:,k+1)= yp;   
     end
 end
 

@@ -141,7 +141,8 @@ function [t, x, u] = nmpc_me(runningcosts, ...
                 'FinDiffType', 'forward',...
                 'RelLineSrchBnd', [],...
                 'RelLineSrchBndDuration', 1,...
-                'TolConSQP', 1e-6);
+                'TolCon', 1e-6, ...
+                'TolConSQP', 1e-6); % change
     iprint = 5;
     t = []; % Will be used to plot the results
     x = [];
@@ -226,6 +227,9 @@ function [t, x, u] = nmpc_me(runningcosts, ...
              linearconstraints, system, ...
             N, t0, x0, u0, T,tol_opt, options, x_ref(:,mpciter+1:mpciter+N+1), ...
         param , linear, u_last,linearisation,s_break,Crosses);
+    %%%%%%%%%%% 
+    ObjFcn = V_current % Display the value of Objective Function for the chosen solution
+    %%%%%%%%%5
         t_Elapsed = toc( t_Start );
         
         % compute the predicted trajectory of the car
@@ -290,6 +294,8 @@ function [u, V, exitflag, output] = solveOptimalControlProblem ...
     end
 
     % Solve optimization problem
+    stop_solution = -1; % Variable used to store the solution the optimizer opted for
+    
     stop = 0; % stop =1 car stops, stop=0 car proceeds
     if any(Crosses)
         % Pedestrian is predicted to cross
@@ -300,6 +306,7 @@ function [u, V, exitflag, output] = solveOptimalControlProblem ...
             u,x_ref,param, linear, u_last), u0, A, b, Aeq, beq, lb, ...
             ub, @(u) nonlinearconstraints(constraints, ...
             system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,stop), options);
+        
             
              % Cost for the car to wait for pedestrian to cross
              stop = 1;
@@ -308,16 +315,21 @@ function [u, V, exitflag, output] = solveOptimalControlProblem ...
             u,x_ref,param, linear, u_last), u0, A, b, Aeq, beq, lb, ...
             ub, @(u) nonlinearconstraints(constraints, ...
             system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,stop), options);
-    
+     %%%%%%%%%%%%%%%%%%%% CHANGE
+            stop_ObjFcn = V_stop % Display values of Objective Function in case car stops
+            acc_ObjFcn = V_acc    % Display values of Objective Function in case car accelerates
+     
+     %%%%%%%%%%%%%55
     
             if (V_stop<V_acc) % stopping the car minimizes the cost
                 [u, V, exitflag, output] = deal(u_stop, V_stop, exitflag_stop, output_stop);
+                stop_solution = 1;
             else   % accelerating the car minimizes the cost
                 [u, V, exitflag, output] = deal(u_acc, V_acc, exitflag_acc, output_acc);
-             end
+                stop_solution = 0;
+            end
             
-        
-          
+                 
     else
         % No need to add the Pedestrian constraints -- less computation
         [u, V, exitflag, output] = fmincon(@(u) costfunction(runningcosts, ...
@@ -327,7 +339,79 @@ function [u, V, exitflag, output] = solveOptimalControlProblem ...
         system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,stop), options);
         
     end
+    %%%%%%%%%% CHANGE
+    %% PLOT CONSTRAINTS
+    % Constraints
+    Constr = nonlinearconstraints(constraints, ...
+        system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,stop_solution);
+    
+    % Constraints of the scenario rejected by Optimizer
+    if (stop_solution ==0) % Optimizer opted for STOPPING
+        Constr_fail = nonlinearconstraints(constraints, ...
+        system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,1);
+    end
+    if (stop_solution ==1) % Optimizer opted for ACCELERATING
+        Constr_fail = nonlinearconstraints(constraints, ...
+        system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,0);
+         
+    end
+    
+    % Plot
+figure (5);
+% Plot fixed constraints
+subplot(321)
+plot(Constr(1,:))
+h = yline(0, 'r--', 'LineWidth', 4);
+xlabel('predicted step');
+ylabel('Lane1');
 
+subplot(322)
+plot(Constr(2,:))
+h = yline(0, 'r--', 'LineWidth', 4);
+xlabel('predicted step');
+ylabel('Lane2');
+
+subplot(324)
+plot(Constr(3,:))
+h = yline(0, 'r--', 'LineWidth', 4);
+xlabel('predicted step');
+ylabel('vmax');
+    
+subplot(323)
+plot(Constr(4,:))
+h = yline(0, 'r--', 'LineWidth', 4);
+xlabel('predicted step');
+ylabel('v>0');
+
+% Plot Constraints in case of Pedestrian
+if (stop_solution == 1 ) % Optimizer opted for STOP as Solution
+    subplot(325)
+plot(Constr(5,:))
+h = yline(0, 'r--', 'LineWidth', 4);
+xlabel('predicted step');
+ylabel('STOPPED!');
+
+subplot(326)
+plot(Constr_fail(5,:))
+h = yline(0, 'r--', 'LineWidth', 4);
+xlabel('predicted step');
+ylabel('ACC_fail!');   
+end
+
+if (stop_solution == 0 ) % Optimizer opted for ACCELERATE as Solution
+    subplot(325)
+plot(Constr(5,:))
+h = yline(0, 'r--', 'LineWidth', 4);
+xlabel('predicted step');
+ylabel('ACCELERATE!');
+
+subplot(326)
+plot(Constr_fail(5,:))
+h = yline(0, 'r--', 'LineWidth', 4);
+xlabel('predicted step');
+ylabel('STOP_fail!');   
+end
+    
 end
 
 function x = computeOpenloopSolution(system, N, T, t0, x0, u, param, linearisation)
