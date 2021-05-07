@@ -42,14 +42,15 @@ param.dev = 1; % distance the car is allowed to diviate from the reference traje
 param.crossing = [10,12]; % pedestrian crossing coordinates
 param.safety = 1; % distance of pedestrian from lane to consider stopping
 param.s_break = 3;    % threshhold distance for the car to start breaking 
+param.v_max = 13; % the max velocity of the car 15ms = 50km/h
 
 %% Initializations
     tmeasure      = 0.0;
-    xmeasure      = [0.0; 0.0; 0.0; 5];  % starts from equilibrium
-    u0            = ones(2,N);  % this is initial guess
+    xmeasure      = [0.0; 0.0; 0.0; 9];  % starts from equilibrium
+    u0            = zeros(2,N);  % this is initial guess
     xp_measure = [11;-4;0;1.5];    % initial position of pedestrian
 %% reference trajectory
-x_ref = [0:mpciterations+N;zeros(2,mpciterations+N+1);13*ones(1,mpciterations+N+1)]; % CHange: x_ref starts from the next state after x0 needs to start at the same time
+x_ref = [0:mpciterations+N;zeros(2,mpciterations+N+1);9*ones(1,mpciterations+N+1)]; % CHange: x_ref starts from the next state after x0 needs to start at the same time
 
 %% Optimization
 
@@ -81,36 +82,69 @@ function cost = runningcosts(t, x, u, x_ref,param)
 end
 
 
-function [c,ceq] = constraints(t, x, x_ref, s_break, param, Crosses, stop)
+function [c,ceq] = constraints(t, x, x_ref, k, param, Crosses, stop)
 %% Non linear constraints
     % Staying in lane conditions
     w_lane = param.dev; 
     L1 = x_ref(2)- w_lane -x(2);
-    L2 = x(2)-x_ref(2)-w_lane;
+    L2 = -x_ref(2)- w_lane +x(2);
+    %L2 = abs( x(2)-x_ref(2) )-w_lane;
     
     % velocity conditions
-    vmax = x(4)-x_ref(4); % 13 m/s = 50km/h
+    vmax = x(4)- param.v_max;
     v_positive = -x(4);
     
     % physical constraints
-    c   = [L1;L2;vmax;v_positive;-1]; % to maintain the size of the vector c: the constraint -1<0 always hold
+    xp_lim = param.crossing;
+    c   = [L1;L2;vmax;v_positive;0]; % to maintain the size of the vector c: the constraint -1<0 always hold
     
-    if (Crosses == 1) % at predicted step the pedestrian is crossing
-        xp_lim = param.crossing;
-        
-        % if the car is stopping before the crossing
+%      if (Crosses == 1) % at predicted step the pedestrian is crossing
+%         %xp_lim = param.crossing;
+%          
+%         %if the car is stopping before the crossing
+%          if (stop ==1)
+%              c(end) = x(1)- xp_lim(1); 
+%              %c(end) = -x(1)+ xp_lim(2);
+%          end
+%          
+%          %if the car is accelerating
+%          if (stop ==0)
+%             c(end) = x(1)- xp_lim(1); 
+%             %c(end) = -x(1)+ xp_lim(2);
+%          end
+%              
+%      end
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%55555
+    if any(Crosses) % The pedestrian is predicted to cross
+
+        %if the car is stopping before the crossing
         if (stop ==1)
-            c(end) = x(1)- xp_lim(1); 
+            
+            % Find the furthest predicted step the pedestrian is crossing
+            i_step = find(Crosses,1,'last');
+            
+            % apply the Stop constraints for all steps before that
+            if (k<=i_step) 
+                c(end) = x(1)- xp_lim(1); 
+            end
+            
         end
         
-        % if the car is accelerating
+        
+        %if the car is accelerating
         if (stop ==0)
-            %c(end) = x(1)- xp_lim(1); 
-            c(end) = -x(1)+ xp_lim(2);
-        end
             
+            % Apply the Acceleration Constraint ONLY for the steps the
+            % pedestrian is crossing
+            if (Crosses(k) == 1)
+                c(end) = -x(1)+ xp_lim(2);
+            end
+            
+        end
+     
     end
-    
     
     
     % pedestrian safety constraints

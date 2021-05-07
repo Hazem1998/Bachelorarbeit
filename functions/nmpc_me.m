@@ -143,7 +143,7 @@ function [t, x, u] = nmpc_me(runningcosts, ...
                 'RelLineSrchBndDuration', 1,...
                 'TolCon', 1e-6, ...
                 'TolConSQP', 1e-6); % change
-    iprint = 5;
+    iprint = 11;
     t = []; % Will be used to plot the results
     x = [];
     u = [];
@@ -228,7 +228,7 @@ function [t, x, u] = nmpc_me(runningcosts, ...
             N, t0, x0, u0, T,tol_opt, options, x_ref(:,mpciter+1:mpciter+N+1), ...
         param , linear, u_last,linearisation,s_break,Crosses);
     %%%%%%%%%%% 
-    ObjFcn = V_current % Display the value of Objective Function for the chosen solution
+    ObjFcn = V_current; % Display the value of Objective Function for the chosen solution
     %%%%%%%%%5
         t_Elapsed = toc( t_Start );
         
@@ -316,8 +316,8 @@ function [u, V, exitflag, output] = solveOptimalControlProblem ...
             ub, @(u) nonlinearconstraints(constraints, ...
             system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,stop), options);
      %%%%%%%%%%%%%%%%%%%% CHANGE
-            stop_ObjFcn = V_stop % Display values of Objective Function in case car stops
-            acc_ObjFcn = V_acc    % Display values of Objective Function in case car accelerates
+            stop_ObjFcn = V_stop; % Display values of Objective Function in case car stops
+            acc_ObjFcn = V_acc;    % Display values of Objective Function in case car accelerates
      
      %%%%%%%%%%%%%55
     
@@ -346,13 +346,13 @@ function [u, V, exitflag, output] = solveOptimalControlProblem ...
         system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,stop_solution);
     
     % Constraints of the scenario rejected by Optimizer
-    if (stop_solution ==0) % Optimizer opted for STOPPING
-        Constr_fail = nonlinearconstraints(constraints, ...
-        system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,1);
-    end
-    if (stop_solution ==1) % Optimizer opted for ACCELERATING
+    if (stop_solution ==1) % Optimizer opted for STOPPING
         Constr_fail = nonlinearconstraints(constraints, ...
         system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,0);
+    end
+    if (stop_solution ==0) % Optimizer opted for ACCELERATING
+        Constr_fail = nonlinearconstraints(constraints, ...
+        system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,1);
          
     end
     
@@ -441,7 +441,7 @@ end
 
 function [c,ceq] = nonlinearconstraints(constraints, ...
     system, ...
-    N, T, t0, x0, u, param, linearisation,x_ref, x_break,linear,Crosses,check)
+    N, T, t0, x0, u, param, linearisation,x_ref, x_break,linear,Crosses,stop)
     x = zeros(N+1, length(x0));
     %x = computeOpenloopSolution(system, N, T, t0, x0, u, param, linearisation);
     %%%%%%%%
@@ -449,13 +449,13 @@ function [c,ceq] = nonlinearconstraints(constraints, ...
     %%%%%%%
     c = [];
     ceq = [];
-    for k=1:N
-        [cnew, ceqnew] = constraints(t0+k*T,x(:,k),x_ref, x_break, param,Crosses(k),check);
+    for k=2:N
+        [cnew, ceqnew] = constraints(t0+k*T,x(:,k),x_ref, k, param,Crosses,stop);
         c = [c cnew];
         ceq = [ceq ceqnew];
     end
     % terminal constraints
-    [cnew, ceqnew] = constraints(t0+(N+1)*T,x(:,N+1),x_ref, x_break, param,Crosses(N+1),check);
+    [cnew, ceqnew] = constraints(t0+(N+1)*T,x(:,N+1),x_ref, N+1, param,Crosses,stop);
     c = [c cnew];
     ceq = [ceq ceqnew];
 end
