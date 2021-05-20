@@ -173,9 +173,9 @@ function [t, x, u] = nmpc_me(runningcosts, ...
         
         for i=1:steps
             % update timescale
-            T = delta_t(i);
+            Ti = delta_t(i);        % CHANGE: this was a bug: T the sampling time should remain the same
             % update Ai and Bi
-            [A_i, B_i] = discret_system_matrices(t0, x0, [0;0], T, param);
+            [A_i, B_i] = discret_system_matrices(t0, x0, [0;0], Ti, param);
             % Add the new matrices to a new cell
             A_d{i} = A_i;
             B_d{i} = B_i;
@@ -216,7 +216,9 @@ function [t, x, u] = nmpc_me(runningcosts, ...
     
         % Update Pedestrian position   
         xp = [ xp; xp_measure ];
-        [xp_measure,~] = Pedest_dynamics(xp0, T);
+        % change: predefined noise
+        w = param.noise;
+        [xp_measure,~] = Pedest_dynamics(xp0, T, w);
  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%5
  
         % Step (2) of the NMPC algorithm:
@@ -241,15 +243,15 @@ function [t, x, u] = nmpc_me(runningcosts, ...
             printSolution(printHeader, printClosedloopData, ...
                           plotTrajectories, mpciter, x0, u_new, ...
                           iprint, ...
-                          exitflag, output, t_Elapsed, param, x_ref,x_pred, xp0, Xp);
+                          exitflag, output, t_Elapsed, param, x_ref,x_pred, xp0, Xp, Crosses);
 
         end
 
 
         %   Store closed loop data
-        t = [ t; tmeasure ];
-        x = [ x; xmeasure ]; % CHANGE: I am not using those so I might delete them
-        u = [ u; u_new(:,1)];
+        t = [ t tmeasure ];
+        x = [ x xmeasure ]; % CHANGE: I am not using those so I might delete them
+        u = [ u u_new(:,1)];
         %   Prepare restart
         u0 = shiftHorizon(u_new);
         
@@ -259,7 +261,27 @@ function [t, x, u] = nmpc_me(runningcosts, ...
         mpciter = mpciter+1
 
        u_last = u_new(:,1); 
+       %%%%%%%%%%%%%% Change: Plot velocity profile
+
+       if (param.steps == 1)
+            figure(3);
+            plot(0:mpciter-1,x(4,:),'r');
+            axis([0 mpciterations 0 13]);
+           title('Standard MPC');
+          xlabel('time instant k');
+          ylabel('velocity v (m/s)');
+       else
+          figure(2);
+          plot(0:mpciter-1,x(4,:),'r');
+          axis([0 mpciterations 0 13]);
+          title('Non-Uniformly Spaced MPC');
+          xlabel('time instant k');
+          ylabel('velocity v (m/s)');                
+       end
+
+      
     end
+    
 end
 
 function [tapplied, xapplied] = applyControl(system, T, t0, x0, u, param, linearisation)
@@ -342,75 +364,75 @@ function [u, V, exitflag, output] = solveOptimalControlProblem ...
     %%%%%%%%%% CHANGE
     %% PLOT CONSTRAINTS
     % Constraints
-    Constr = nonlinearconstraints(constraints, ...
-        system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,stop_solution);
-    
-    % Constraints of the scenario rejected by Optimizer
-    if (stop_solution ==1) % Optimizer opted for STOPPING
-        Constr_fail = nonlinearconstraints(constraints, ...
-        system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,0);
-    end
-    if (stop_solution ==0) % Optimizer opted for ACCELERATING
-        Constr_fail = nonlinearconstraints(constraints, ...
-        system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,1);
-         
-    end
-    
-    % Plot
-figure (5);
-% Plot fixed constraints
-subplot(321)
-plot(Constr(1,:))
-h = yline(0, 'r--', 'LineWidth', 4);
-xlabel('predicted step');
-ylabel('Lane1');
-
-subplot(322)
-plot(Constr(2,:))
-h = yline(0, 'r--', 'LineWidth', 4);
-xlabel('predicted step');
-ylabel('Lane2');
-
-subplot(324)
-plot(Constr(3,:))
-h = yline(0, 'r--', 'LineWidth', 4);
-xlabel('predicted step');
-ylabel('vmax');
-    
-subplot(323)
-plot(Constr(4,:))
-h = yline(0, 'r--', 'LineWidth', 4);
-xlabel('predicted step');
-ylabel('v>0');
-
-% Plot Constraints in case of Pedestrian
-if (stop_solution == 1 ) % Optimizer opted for STOP as Solution
-    subplot(325)
-plot(Constr(5,:))
-h = yline(0, 'r--', 'LineWidth', 4);
-xlabel('predicted step');
-ylabel('STOPPED!');
-
-subplot(326)
-plot(Constr_fail(5,:))
-h = yline(0, 'r--', 'LineWidth', 4);
-xlabel('predicted step');
-ylabel('ACC_fail!');   
-end
-
-if (stop_solution == 0 ) % Optimizer opted for ACCELERATE as Solution
-    subplot(325)
-plot(Constr(5,:))
-h = yline(0, 'r--', 'LineWidth', 4);
-xlabel('predicted step');
-ylabel('ACCELERATE!');
-
-subplot(326)
-plot(Constr_fail(5,:))
-h = yline(0, 'r--', 'LineWidth', 4);
-xlabel('predicted step');
-ylabel('STOP_fail!');   
-end
+%     Constr = nonlinearconstraints(constraints, ...
+%         system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,stop_solution);
+%     
+%     % Constraints of the scenario rejected by Optimizer
+%     if (stop_solution ==1) % Optimizer opted for STOPPING
+%         Constr_fail = nonlinearconstraints(constraints, ...
+%         system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,0);
+%     end
+%     if (stop_solution ==0) % Optimizer opted for ACCELERATING
+%         Constr_fail = nonlinearconstraints(constraints, ...
+%         system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,1);
+%          
+%     end
+%     
+%     % Plot
+% figure (5);
+% % Plot fixed constraints
+% subplot(321)
+% plot(Constr(1,:))
+% h = yline(0, 'r--', 'LineWidth', 4);
+% xlabel('predicted step');
+% ylabel('Lane1');
+% 
+% subplot(322)
+% plot(Constr(2,:))
+% h = yline(0, 'r--', 'LineWidth', 4);
+% xlabel('predicted step');
+% ylabel('Lane2');
+% 
+% subplot(324)
+% plot(Constr(3,:))
+% h = yline(0, 'r--', 'LineWidth', 4);
+% xlabel('predicted step');
+% ylabel('vmax');
+%     
+% subplot(323)
+% plot(Constr(4,:))
+% h = yline(0, 'r--', 'LineWidth', 4);
+% xlabel('predicted step');
+% ylabel('v>0');
+% 
+% % Plot Constraints in case of Pedestrian
+% if (stop_solution == 1 ) % Optimizer opted for STOP as Solution
+%     subplot(325)
+% plot(Constr(5,:))
+% h = yline(0, 'r--', 'LineWidth', 4);
+% xlabel('predicted step');
+% ylabel('STOPPED!');
+% 
+% subplot(326)
+% plot(Constr_fail(5,:))
+% h = yline(0, 'r--', 'LineWidth', 4);
+% xlabel('predicted step');
+% ylabel('ACC_fail!');   
+% end
+% 
+% if (stop_solution == 0 ) % Optimizer opted for ACCELERATE as Solution
+%     subplot(325)
+% plot(Constr(5,:))
+% h = yline(0, 'r--', 'LineWidth', 4);
+% xlabel('predicted step');
+% ylabel('ACCELERATE!');
+% 
+% subplot(326)
+% plot(Constr_fail(5,:))
+% h = yline(0, 'r--', 'LineWidth', 4);
+% xlabel('predicted step');
+% ylabel('STOP_fail!');   
+% end
     
 end
 
@@ -466,7 +488,7 @@ end
 %%%%%% OUTPUT %%%%%%%%%%%%%
 function printSolution(printHeader, printClosedloopData, ...
              plotTrajectories, mpciter, x0, u, iprint, exitflag, output, t_Elapsed, ...
-             param, x_ref, x, xp0, Xp)
+             param, x_ref, x, xp0, Xp, Crosses)
     if (mpciter == 0)
         printHeader();
     end
@@ -546,7 +568,7 @@ function printSolution(printHeader, printClosedloopData, ...
     end
     if ( iprint >= 5 )
     % NOTE: it simply plots the next state from the current x0 wich will be updated with each control point mpciter
-        plotTrajectories(x, x0, param, x_ref, xp0, Xp) 
+        plotTrajectories(x, x0, param, x_ref, xp0, Xp, Crosses) 
     end
 end
 
@@ -590,7 +612,7 @@ function Xp = Pedestrian_path(Pedest_prediction, N,param,xp0)
 %% Calculate the non uniform pedestrian state Xp 
 % Compute the state vector x by Concatenating all state vectors
 % corresponding to different timescales
-
+    w = param.noise;
     delta_t = param.dt;
     steps = param.steps;
     Xp = xp0;
@@ -600,7 +622,7 @@ function Xp = Pedestrian_path(Pedest_prediction, N,param,xp0)
         T = delta_t(i);
         
         % Calculate timescale corresponding state vector
-        xpi = Pedest_prediction(T,xp0,N);
+        xpi = Pedest_prediction(T,xp0,N,w);
         
         % update parameters
         xp0 = xpi(:,Np+1); 

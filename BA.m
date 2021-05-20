@@ -39,22 +39,35 @@ param.Lane = [-1.5,5];
 param.dev = 1; % distance the car is allowed to diviate from the reference trajectory
 
 % Safety parameters in case of pedestrian crossing
-param.crossing = [10,12]; % pedestrian crossing coordinates
+param.crossing = [20,22]; % pedestrian crossing coordinates
 param.safety = 1; % distance of pedestrian from lane to consider stopping
 param.s_break = 3;    % threshhold distance for the car to start breaking 
 param.v_max = 13; % the max velocity of the car 15ms = 50km/h
 
 %% Initializations
     tmeasure      = 0.0;
-    xmeasure      = [0.0; 0.0; 0.0; 9];  % starts from equilibrium
+    xmeasure      = [0.0; 0.0; 0.0; 8.5];  % starts from equilibrium
     u0            = zeros(2,N);  % this is initial guess
-    xp_measure = [11;-4;0;1.5];    % initial position of pedestrian
+    xp_measure = [21;-5;0;1.5];    % initial position of pedestrian
 %% reference trajectory
-x_ref = [0:mpciterations+N;zeros(2,mpciterations+N+1);9*ones(1,mpciterations+N+1)]; % CHange: x_ref starts from the next state after x0 needs to start at the same time
+x_ref = [0:mpciterations+N;zeros(2,mpciterations+N+1);8.5*ones(1,mpciterations+N+1)]; % CHange: x_ref starts from the next state after x0 needs to start at the same time
 
 %% Optimization
+% CHANGE
+% Noise pre-defined for to compare results
+param.noise = randn(2,1);
 
+    % Non uniform MPC
     nmpc_me(@runningcosts, @constraints, ...
+          @linearconstraints, @system, ...
+         mpciterations, N, T, tmeasure, xmeasure, u0, x_ref,xp_measure,@Non_linear_system, ...
+            param, @discret_system_matrices, @printHeader, @printClosedloopData, @plotTrajectories, ...
+        @Pedest_prediction, @Pedest_dynamics);
+    
+    % Standard MPC
+    param.steps = 1;
+    
+        nmpc_me(@runningcosts, @constraints, ...
           @linearconstraints, @system, ...
          mpciterations, N, T, tmeasure, xmeasure, u0, x_ref,xp_measure,@Non_linear_system, ...
             param, @discret_system_matrices, @printHeader, @printClosedloopData, @plotTrajectories, ...
@@ -258,7 +271,7 @@ function printClosedloopData(mpciter, u, x, t_Elapsed)
              mpciter, u(1,1),u(2,1), x(1), x(2),x(3),x(4), t_Elapsed);
 end
 
-function plotTrajectories( x, x0, param, x_ref, xp0, Xp)           
+function plotTrajectories( x, x0, param, x_ref, xp0, Xp, Crosses)           
 %% Plot current frame
     l_r = param.distance(1);
     l_f = param.distance(2);
@@ -275,9 +288,9 @@ function plotTrajectories( x, x0, param, x_ref, xp0, Xp)
     y_ped = [y_lim(1), y_lim(2), y_lim(2), y_lim(1), y_lim(1)];
     %%%%%%%%%%%
     figure(1);
-        title('s/d closed loop trajectory');
-        xlabel('s');
-        ylabel('d');
+        title('Velocity v = 10 (m/s)');
+        xlabel('position x (m)');
+        ylabel('position y (m)');
         grid on;
         hold on;
         
@@ -291,7 +304,15 @@ function plotTrajectories( x, x0, param, x_ref, xp0, Xp)
         
         
         % Plot Pedesterian prediction
-        plot(Xp(1,:),Xp(2,:),'or', 'MarkerFaceColor','g')
+        for i=1:size(Crosses)
+            if (Crosses(i) == 1)
+                plot(Xp(1,i),Xp(2,i),'xr', 'MarkerFaceColor','g')
+                plot(x(1,i),x(2,i),'or', 'MarkerFaceColor','r');
+            else
+                plot(Xp(1,i),Xp(2,i),'xb', 'MarkerFaceColor','g')
+                plot(x(1,i),x(2,i),'ob');
+            end
+        end
         
         % Plot Pedesterian current position
         plot(xp0(1),xp0(2),'o','MarkerFaceColor','black')
@@ -304,7 +325,7 @@ function plotTrajectories( x, x0, param, x_ref, xp0, Xp)
         plot(linspace(x_ref(1,1),x_ref(1,length(x_ref)),100),linspace(x_ref(2,1),x_ref(2,length(x_ref)), 100),'r')
       
        % THIS plots the predicted path
-        plot(x(1,:),x(2,:),'or', 'MarkerFaceColor','r');
+       % plot(x(1,:),x(2,:),'or', 'MarkerFaceColor','r');
         %plot(C(:,2)+x(1),C(:,1)+x(2),'b')   
         
        % Plot the actual trajectory of the car
@@ -318,7 +339,7 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%Pedestrian%%%%%%%
 % xp = [x,y,vx,vy] 4 x 1 
-function [y, y_nmpc] = Pedest_dynamics(xp,T)
+function [y, y_nmpc] = Pedest_dynamics(xp,T,w) % change: predefined noise
 %% Pedestrian dynamics
 
     F = [1 0 T 0; 0 1 0 T; 0 0 1 0; 0 0 0 1];
@@ -329,16 +350,18 @@ function [y, y_nmpc] = Pedest_dynamics(xp,T)
     y_nmpc = F*xp;
 
     % Actual movement with Gaussian Noise
-    w = randn(2,1);
+    %w = randn(2,1);
     y = y_nmpc + G*w;
+    %%%%%%5
+    y = y_nmpc;
 
 end
 
-function Xp = Pedest_prediction(T,xp0,N)
+function Xp = Pedest_prediction(T,xp0,N,w)
 %% Prediction of the pedestrian Path
     Xp(:,1) = xp0;
     for k=1:N
-       [~,yp]  = Pedest_dynamics(Xp(:,k),T);  
+       [~,yp]  = Pedest_dynamics(Xp(:,k),T,w);  
         Xp(:,k+1)= yp;   
     end
 end
