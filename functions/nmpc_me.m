@@ -340,13 +340,23 @@ function [u, V, exitflag, output] = solveOptimalControlProblem ...
      %%%%%%%%%%%%%%%%%%%% CHANGE
             stop_ObjFcn = V_stop; % Display values of Objective Function in case car stops
             acc_ObjFcn = V_acc;    % Display values of Objective Function in case car accelerates
-     
+            exitflag_acc_temp = exitflag_acc
+            exitflag_stop_temp = exitflag_stop     
      %%%%%%%%%%%%%55
     
             if (V_stop<V_acc) % stopping the car minimizes the cost
                 [u, V, exitflag, output] = deal(u_stop, V_stop, exitflag_stop, output_stop);
                 stop_solution = 1;
             else   % accelerating the car minimizes the cost
+                [u, V, exitflag, output] = deal(u_acc, V_acc, exitflag_acc, output_acc);
+                stop_solution = 0;
+            end
+            
+            if (exitflag_acc == -2)&&(exitflag_stop ~= -2)
+                [u, V, exitflag, output] = deal(u_stop, V_stop, exitflag_stop, output_stop);
+                stop_solution = 1;
+            end
+            if (exitflag_acc ~= -2)&&(exitflag_stop == -2)
                 [u, V, exitflag, output] = deal(u_acc, V_acc, exitflag_acc, output_acc);
                 stop_solution = 0;
             end

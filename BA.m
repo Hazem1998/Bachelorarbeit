@@ -6,11 +6,11 @@ clear all;
 addpath functions;
 %% General
     mpciterations = 40;     % How this was chosen?
-    N             = 12;     
+    N             = 15;     
     T             = 0.1;    % Sampling interval
     
 %% Non uniform parameters
-    steps = 3; % number of timescales (non uniform steps)
+    steps = 5; % number of timescales (non uniform steps)
     % Np_i : prediction = N/2 and Nc_i: control =mpciterations/2 =5
     % N and mpciteration should be divided by steps 
     % delta_ti propotional to 1/EValuei(A)
@@ -39,7 +39,7 @@ param.Lane = [-1.5,5];
 param.dev = 1; % distance the car is allowed to diviate from the reference trajectory
 
 % Safety parameters in case of pedestrian crossing
-param.crossing = [20,22]; % pedestrian crossing coordinates
+param.crossing = [22,24]; % pedestrian crossing coordinates
 param.safety = 1; % distance of pedestrian from lane to consider stopping
 param.s_break = 3;    % threshhold distance for the car to start breaking 
 param.v_max = 13; % the max velocity of the car 15ms = 50km/h
@@ -48,7 +48,7 @@ param.v_max = 13; % the max velocity of the car 15ms = 50km/h
     tmeasure      = 0.0;
     xmeasure      = [0.0; 0.0; 0.0; 8.5];  % starts from equilibrium
     u0            = zeros(2,N);  % this is initial guess
-    xp_measure = [21;-5;0;1.5];    % initial position of pedestrian
+    xp_measure = [23;-5;0;1.5];    % initial position of pedestrian
 %% reference trajectory
 x_ref = [0:mpciterations+N;zeros(2,mpciterations+N+1);8.5*ones(1,mpciterations+N+1)]; % CHange: x_ref starts from the next state after x0 needs to start at the same time
 
