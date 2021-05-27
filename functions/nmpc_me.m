@@ -348,8 +348,8 @@ function [u, V, exitflag, output] = solveOptimalControlProblem ...
                 [u, V, exitflag, output] = deal(u_stop, V_stop, exitflag_stop, output_stop);
                 stop_solution = 1;
             else   % accelerating the car minimizes the cost
-                [u, V, exitflag, output] = deal(u_acc, V_acc, exitflag_acc, output_acc);
-                %[u, V, exitflag, output] = deal(u_stop, V_stop, exitflag_stop, output_stop);
+                %[u, V, exitflag, output] = deal(u_acc, V_acc, exitflag_acc, output_acc);
+                [u, V, exitflag, output] = deal(u_stop, V_stop, exitflag_stop, output_stop);
                 stop_solution = 0;
             end
             
@@ -467,7 +467,7 @@ function cost = costfunction(runningcosts, system, ...
     % x = computeOpenloopSolution(system, N, T, t0, x0, u, param, linearisation); 
     x = dynamics(system,N,x0,t0,u, param, linear,Non_linear_system); 
     cost = cost+ runningcosts(t0+1*T, x(:,2), [u_last,u(:,1)], x_ref(:,2), param); % K=0 in Matlab is k=1 and so u(-1) in Matlab u(0)=u_last
-    for k=2:(N-1)
+    for k=2:N
         cost = cost+runningcosts(t0+k*T, x(:,k+1), u(:,k-1:k), x_ref(:,k+1), param); % changed to include u(k-1) and x_ref
     end
 end

@@ -22,12 +22,12 @@ addpath functions;
     param.dt = delta_t;
     param.steps = steps;
     
-    
 %% Model parameters
 l_r = 2;    % Distance from vehicle center of gravity to the rear in meters  % change
 l_f = 2;    % Distance from vehicle center of gravity to the front in meters
 param.distance = [l_r, l_f];
 % Weighting matrices
+%param.Q = diag([0 10 10 0.2]);
 param.Q = diag([0 0.25 0.2 10]);
 param.R = diag([0.33 5]);
 param.S = diag([0.33 15]);
@@ -99,9 +99,9 @@ function [c,ceq] = constraints(t, x, x_ref, k, param, Crosses, stop)
 %% Non linear constraints
     % Staying in lane conditions
     w_lane = param.dev; 
-    L1 = x_ref(2)- w_lane -x(2);
-    L2 = -x_ref(2)- w_lane +x(2);
-    %L2 = abs( x(2)-x_ref(2) )-w_lane;
+%     L1 = x_ref(2)- w_lane -x(2);
+%     L2 = -x_ref(2)- w_lane +x(2);
+    L = abs( x(2)-x_ref(2) )-w_lane;
     
     % velocity conditions
     vmax = x(4)- param.v_max;
@@ -109,7 +109,9 @@ function [c,ceq] = constraints(t, x, x_ref, k, param, Crosses, stop)
     
     % physical constraints
     xp_lim = param.crossing;
-    c   = [L1;L2;vmax;v_positive;0]; % to maintain the size of the vector c: the constraint -1<0 always hold
+    l_r = param.distance(1);
+    l_f = param.distance(2);
+    c   = [L;vmax;v_positive;-1]; % to maintain the size of the vector c: the constraint -1<0 always hold
     
 %      if (Crosses == 1) % at predicted step the pedestrian is crossing
 %         %xp_lim = param.crossing;
@@ -140,7 +142,7 @@ function [c,ceq] = constraints(t, x, x_ref, k, param, Crosses, stop)
             
             % apply the Stop constraints for all steps before that
             if (k<=i_step) 
-                c(end) = x(1)- xp_lim(1); 
+                c(end) = x(1)- (xp_lim(1)-l_f);
             end
             
         end
@@ -152,7 +154,7 @@ function [c,ceq] = constraints(t, x, x_ref, k, param, Crosses, stop)
             % Apply the Acceleration Constraint ONLY for the steps the
             % pedestrian is crossing
             if (Crosses(k) == 1)
-                c(end) = -x(1)+ xp_lim(2);
+                c(end) = -x(1)+ (xp_lim(2)+l_r);
             end
             
         end
