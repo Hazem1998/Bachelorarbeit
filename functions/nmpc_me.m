@@ -228,14 +228,14 @@ function [t, x, u] = nmpc_me(runningcosts, ...
             (runningcosts, constraints, ...
              linearconstraints, system, ...
             N, t0, x0, u0, T,tol_opt, options, x_ref(:,mpciter+1:mpciter+N+1), ...
-        param , linear, u_last,linearisation,s_break,Crosses);
+        param , linear, u_last,linearisation,s_break,Crosses,Non_linear_system);
     %%%%%%%%%%% 
     ObjFcn = V_current; % Display the value of Objective Function for the chosen solution
     %%%%%%%%%5
         t_Elapsed = toc( t_Start );
         
         % compute the predicted trajectory of the car
-        x_pred = dynamics(system,N,x0,t0,u_new, param, linear);
+        x_pred = dynamics(system,N,x0,t0,u_new, param, linear,Non_linear_system);
         
         %   Print solution : I will check it later
         
@@ -293,10 +293,10 @@ end
 function [u, V, exitflag, output] = solveOptimalControlProblem ...
     (runningcosts, constraints, ...
     linearconstraints, system, N, t0, x0, u0, T, tol_opt, ...
-    options, x_ref, param, linear, u_last,linearisation,x_break,Crosses)
+    options, x_ref, param, linear, u_last,linearisation,x_break,Crosses,Non_linear_system)
     x = zeros(length(x0), N+1);
   %  x = computeOpenloopSolution(system, N, T, t0, x0, u0, param, linearisation);
-    x = dynamics(system,N,x0,t0,u0, param, linear);
+    x = dynamics(system,N,x0,t0,u0, param, linear,Non_linear_system);
     % Set control and linear bounds
     A = [];
     b = [];
@@ -325,23 +325,23 @@ function [u, V, exitflag, output] = solveOptimalControlProblem ...
             % Cost for the car to pass before pedestrian crosses
             [u_acc, V_acc, exitflag_acc, output_acc] = fmincon(@(u) costfunction(runningcosts, ...
             system, N, T, t0, x0, ...
-            u,x_ref,param, linear, u_last), u0, A, b, Aeq, beq, lb, ...
+            u,x_ref,param, linear, u_last,Non_linear_system), u0, A, b, Aeq, beq, lb, ...
             ub, @(u) nonlinearconstraints(constraints, ...
-            system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,stop), options);
+            system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,stop,Non_linear_system), options);
         
             
              % Cost for the car to wait for pedestrian to cross
              stop = 1;
             [u_stop, V_stop, exitflag_stop, output_stop] = fmincon(@(u) costfunction(runningcosts, ...
             system, N, T, t0, x0, ...
-            u,x_ref,param, linear, u_last), u0, A, b, Aeq, beq, lb, ...
+            u,x_ref,param, linear, u_last,Non_linear_system), u0, A, b, Aeq, beq, lb, ...
             ub, @(u) nonlinearconstraints(constraints, ...
-            system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,stop), options);
+            system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,stop,Non_linear_system), options);
      %%%%%%%%%%%%%%%%%%%% CHANGE
             stop_ObjFcn = V_stop; % Display values of Objective Function in case car stops
             acc_ObjFcn = V_acc;    % Display values of Objective Function in case car accelerates
-            exitflag_acc_temp = exitflag_acc
-            exitflag_stop_temp = exitflag_stop     
+            exitflag_acc_temp = exitflag_acc;
+            exitflag_stop_temp = exitflag_stop;     
      %%%%%%%%%%%%%55
     
             if (V_stop<V_acc) % stopping the car minimizes the cost
@@ -349,26 +349,27 @@ function [u, V, exitflag, output] = solveOptimalControlProblem ...
                 stop_solution = 1;
             else   % accelerating the car minimizes the cost
                 [u, V, exitflag, output] = deal(u_acc, V_acc, exitflag_acc, output_acc);
+                %[u, V, exitflag, output] = deal(u_stop, V_stop, exitflag_stop, output_stop);
                 stop_solution = 0;
             end
             
-            if (exitflag_acc == -2)&&(exitflag_stop ~= -2)
-                [u, V, exitflag, output] = deal(u_stop, V_stop, exitflag_stop, output_stop);
-                stop_solution = 1;
-            end
-            if (exitflag_acc ~= -2)&&(exitflag_stop == -2)
-                [u, V, exitflag, output] = deal(u_acc, V_acc, exitflag_acc, output_acc);
-                stop_solution = 0;
-            end
+%             if (exitflag_acc == -2)&&(exitflag_stop ~= -2)
+%                 [u, V, exitflag, output] = deal(u_stop, V_stop, exitflag_stop, output_stop);
+%                 stop_solution = 1;
+%             end
+%             if (exitflag_acc ~= -2)&&(exitflag_stop == -2)
+%                 [u, V, exitflag, output] = deal(u_acc, V_acc, exitflag_acc, output_acc);
+%                 stop_solution = 0;
+%             end
             
                  
     else
         % No need to add the Pedestrian constraints -- less computation
         [u, V, exitflag, output] = fmincon(@(u) costfunction(runningcosts, ...
         system, N, T, t0, x0, ...
-        u,x_ref,param, linear, u_last), u0, A, b, Aeq, beq, lb, ...
+        u,x_ref,param, linear, u_last,Non_linear_system), u0, A, b, Aeq, beq, lb, ...
         ub, @(u) nonlinearconstraints(constraints, ...
-        system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,stop), options);
+        system, N, T, t0, x0, u, param, linearisation,x_ref,x_break,linear,Crosses,stop,Non_linear_system), options);
         
     end
     %%%%%%%%%% CHANGE
@@ -459,12 +460,12 @@ end
 
 function cost = costfunction(runningcosts, system, ...
                     N, T, t0, x0, u, x_ref, param, ...
-                    linear, u_last)
+                    linear, u_last,Non_linear_system)
     cost = 0;
     n = length(x0);
     x = zeros(n, N+1);
     % x = computeOpenloopSolution(system, N, T, t0, x0, u, param, linearisation); 
-    x = dynamics(system,N,x0,t0,u, param, linear); 
+    x = dynamics(system,N,x0,t0,u, param, linear,Non_linear_system); 
     cost = cost+ runningcosts(t0+1*T, x(:,2), [u_last,u(:,1)], x_ref(:,2), param); % K=0 in Matlab is k=1 and so u(-1) in Matlab u(0)=u_last
     for k=2:(N-1)
         cost = cost+runningcosts(t0+k*T, x(:,k+1), u(:,k-1:k), x_ref(:,k+1), param); % changed to include u(k-1) and x_ref
@@ -473,21 +474,21 @@ end
 
 function [c,ceq] = nonlinearconstraints(constraints, ...
     system, ...
-    N, T, t0, x0, u, param, linearisation,x_ref, x_break,linear,Crosses,stop)
+    N, T, t0, x0, u, param, linearisation,x_ref, x_break,linear,Crosses,stop, Non_linear_system)
     x = zeros(N+1, length(x0));
     %x = computeOpenloopSolution(system, N, T, t0, x0, u, param, linearisation);
     %%%%%%%%
-    x = dynamics(system,N,x0,t0,u, param, linear);
+    x = dynamics(system,N,x0,t0,u, param, linear, Non_linear_system);
     %%%%%%%
     c = [];
     ceq = [];
     for k=2:N
-        [cnew, ceqnew] = constraints(t0+k*T,x(:,k),x_ref, k, param,Crosses,stop);
+        [cnew, ceqnew] = constraints(t0+k*T,x(:,k),x_ref(:,k), k, param,Crosses,stop);
         c = [c cnew];
         ceq = [ceq ceqnew];
     end
     % terminal constraints
-    [cnew, ceqnew] = constraints(t0+(N+1)*T,x(:,N+1),x_ref, N+1, param,Crosses,stop);
+    [cnew, ceqnew] = constraints(t0+(N+1)*T,x(:,N+1),x_ref(:,N+1), N+1, param,Crosses,stop);
     c = [c cnew];
     ceq = [ceq ceqnew];
 end
@@ -585,7 +586,7 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%  NON UNIFORM NPMC  %%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-function X = dynamics(system, N, x0, t0, u0, param, linear)
+function X = dynamics(system, N, x0, t0, u0, param, linear,Non_linear_system)
 %% Calculate the state vector X 
 % Compute the state vector x by Concatenating all state vectors
 % corresponding to different timescales
@@ -606,10 +607,12 @@ function X = dynamics(system, N, x0, t0, u0, param, linear)
         linearisation.B = B_d{i};
     
         % Calculate timescale corresponding state vector
-        xi = computeOpenloopSolution(system, Np, T, t0, x0, u0, param, linearisation);
+        xi = computeOpenloopSolution(system, Np, T, t0, x0, u0(:,1+Np*(i-1):Np*i), param, linearisation);
         % update parameters
         x0 = xi(:,Np+1); 
         xi = xi(:,2:Np+1); % remove x(:,1)=x0
+        
+        linearisation.f = Non_linear_system(x0, [0;0], param); 
         %Np = Np*(i+1); % this is wrong as Np is the same for all timescales
         % Concatenate new vectors
         X = [X,xi];
@@ -632,7 +635,7 @@ function Xp = Pedestrian_path(Pedest_prediction, N,param,xp0)
         T = delta_t(i);
         
         % Calculate timescale corresponding state vector
-        xpi = Pedest_prediction(T,xp0,N,w);
+        xpi = Pedest_prediction(T,xp0,Np,w);
         
         % update parameters
         xp0 = xpi(:,Np+1); 
