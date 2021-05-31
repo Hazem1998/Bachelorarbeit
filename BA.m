@@ -1,75 +1,72 @@
 function Main
 %% Clear and addpath
-clc;
-close all;
-clear all;
-addpath functions;
+    clc;
+    close all;
+    clear all;
+    addpath functions;
 %% General
-    mpciterations = 40;     % How this was chosen?
-    N             = 15;     
+    mpciterations = 40;     % Simulation length
+    N             = 12;     % prediction Horizon  
     T             = 0.1;    % Sampling interval
+    iprint = 11;            % Print and visualize Output
     
 %% Non uniform parameters
-    steps = 5; % number of timescales (non uniform steps)
-    % Np_i : prediction = N/2 and Nc_i: control =mpciterations/2 =5
-    % N and mpciteration should be divided by steps 
-    % delta_ti propotional to 1/EValuei(A)
-    % Also N<mpciterations must hold!
-    delta_t = size(steps);
-    for i=1:steps
-        delta_t(i) = T*i; % just an example of changing delta_t prop. to the timescale
+    steps = 3; % number of timescales (non uniform steps)
+    
+    delta_t = size(steps,1);
+    delta_t(1) = T;
+    for i=2:steps
+        delta_t(i) = delta_t(i-1) + T; % Time scales (as per each non-uniformly spaced MPC step)
     end
     param.dt = delta_t;
     param.steps = steps;
     
+    
 %% Model parameters
-l_r = 2;    % Distance from vehicle center of gravity to the rear in meters  % change
-l_f = 2;    % Distance from vehicle center of gravity to the front in meters
-param.distance = [l_r, l_f];
-% Weighting matrices
-%param.Q = diag([0 10 10 0.2]);
-param.Q = diag([0 0.25 0.2 10]);
-param.R = diag([0.33 5]);
-param.S = diag([0.33 15]);
+    l_r = 1.5;    % Distance from vehicle center of gravity to the rear Axis in meters  
+    l_f = 1.5;    % Distance from vehicle center of gravity to the front Axis in meters
+    param.distance = [l_r, l_f];
+    % Weighting matrices (Cost function)
+    param.Q = diag([0 15 15 0.2]);
+    param.R = diag([0.33 15]);
+    param.S = diag([5 5]);
 
-% Lane coordinates 6.5m width
-param.Lane = [-1.5,5]; 
+    % Lane coordinates 6.5m width
+    param.Lane = [-1.5,5]; 
 
-% staying in Lane constraints
-param.dev = 1; % distance the car is allowed to diviate from the reference trajectory
+    % staying in Lane constraints
+    param.dev = 1; % distance the car is allowed to diviate from the reference trajectory
 
-% Safety parameters in case of pedestrian crossing
-param.crossing = [22,24]; % pedestrian crossing coordinates
-param.safety = 1; % distance of pedestrian from lane to consider stopping
-param.s_break = 3;    % threshhold distance for the car to start breaking 
-param.v_max = 13; % the max velocity of the car 15ms = 50km/h
+    % Safety parameters in case of pedestrian crossing
+    param.crossing = [18,20]; % pedestrian crossing coordinates
+    param.safety = 1; % distance of pedestrian from lane to consider stopping
+    param.v_max = 13; % the max velocity of the car 15ms = 50km/h
 
 %% Initializations
-    tmeasure      = 0.0;
-    xmeasure      = [0.0; 0.0; 0.0; 8.5];  % starts from equilibrium
-    u0            = zeros(2,N);  % this is initial guess
-    xp_measure = [23;-5;0;1.5];    % initial position of pedestrian
+    xmeasure      = [0.0; 0.0; 0.0; 8.5];  % Initial state
+    u0            = zeros(2,N);  % Input initial guess
+    xp_measure = [19;-5;0;1.5];    % initial position of pedestrian
+    
 %% reference trajectory
-x_ref = [0:mpciterations+N;zeros(2,mpciterations+N+1);8.5*ones(1,mpciterations+N+1)]; % CHange: x_ref starts from the next state after x0 needs to start at the same time
+    x_ref = [0:mpciterations+N;zeros(2,mpciterations+N+1);8.5*ones(1,mpciterations+N+1)];
 
 %% Optimization
-% CHANGE
-% Noise pre-defined for to compare results
-param.noise = randn(2,1);
+    % Define same noise for both simulations
+    param.noise = randn(2,mpciterations);
 
     % Non uniform MPC
     nmpc_me(@runningcosts, @constraints, ...
           @linearconstraints, @system, ...
-         mpciterations, N, T, tmeasure, xmeasure, u0, x_ref,xp_measure,@Non_linear_system, ...
+         mpciterations, N, T, xmeasure, u0, x_ref,xp_measure,iprint,@Non_linear_system, ...
             param, @discret_system_matrices, @printHeader, @printClosedloopData, @plotTrajectories, ...
         @Pedest_prediction, @Pedest_dynamics);
     
     % Standard MPC
     param.steps = 1;
     
-        nmpc_me(@runningcosts, @constraints, ...
+    nmpc_me(@runningcosts, @constraints, ...
           @linearconstraints, @system, ...
-         mpciterations, N, T, tmeasure, xmeasure, u0, x_ref,xp_measure,@Non_linear_system, ...
+         mpciterations, N, T, xmeasure, u0, x_ref,xp_measure,iprint,@Non_linear_system, ...
             param, @discret_system_matrices, @printHeader, @printClosedloopData, @plotTrajectories, ...
         @Pedest_prediction, @Pedest_dynamics);
 
@@ -84,7 +81,7 @@ end
 % x=[s;d;phi;v] size(x) = 4 x 1
 % u=[a;delta]   size(u) = 2 x N with N= Horizon
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-function cost = runningcosts(t, x, u, x_ref,param)
+function cost = runningcosts(x, u, x_ref,param)
 %% Running cost of the system
    u_curr = u(:,2);
    u_prev = u(:,1);
@@ -95,12 +92,10 @@ function cost = runningcosts(t, x, u, x_ref,param)
 end
 
 
-function [c,ceq] = constraints(t, x, x_ref, k, param, Crosses, stop)
-%% Non linear constraints
+function [c,ceq] = constraints(x, x_ref, k, param, Crosses, stop)
+%% Non linear constraints (State Constraints)
     % Staying in lane conditions
     w_lane = param.dev; 
-%     L1 = x_ref(2)- w_lane -x(2);
-%     L2 = -x_ref(2)- w_lane +x(2);
     L = abs( x(2)-x_ref(2) )-w_lane;
     
     % velocity conditions
@@ -111,72 +106,45 @@ function [c,ceq] = constraints(t, x, x_ref, k, param, Crosses, stop)
     xp_lim = param.crossing;
     l_r = param.distance(1);
     l_f = param.distance(2);
-    c   = [L;vmax;v_positive;-1]; % to maintain the size of the vector c: the constraint -1<0 always hold
     
-%      if (Crosses == 1) % at predicted step the pedestrian is crossing
-%         %xp_lim = param.crossing;
-%          
-%         %if the car is stopping before the crossing
-%          if (stop ==1)
-%              c(end) = x(1)- xp_lim(1); 
-%              %c(end) = -x(1)+ xp_lim(2);
-%          end
-%          
-%          %if the car is accelerating
-%          if (stop ==0)
-%             c(end) = x(1)- xp_lim(1); 
-%             %c(end) = -x(1)+ xp_lim(2);
-%          end
-%              
-%      end
-
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%55555
-    if any(Crosses) % The pedestrian is predicted to cross
+    % Constraints vector: 
+    % Pedestrian Constraint == 0 unless a pedestrian is detected
+    c   = [L;vmax;v_positive;-1];
+    
+    % The pedestrian is predicted to cross
+    if any(Crosses) 
 
         %if the car is stopping before the crossing
-        if (stop ==1)
-            
+        if (stop ==1)  
             % Find the furthest predicted step the pedestrian is crossing
             i_step = find(Crosses,1,'last');
-            
             % apply the Stop constraints for all steps before that
             if (k<=i_step) 
                 c(end) = x(1)- (xp_lim(1)-l_f);
-            end
-            
+            end           
         end
-        
         
         %if the car is accelerating
         if (stop ==0)
-            
             % Apply the Acceleration Constraint ONLY for the steps the
             % pedestrian is crossing
             if (Crosses(k) == 1)
                 c(end) = -x(1)+ (xp_lim(2)+l_r);
-            end
-            
+            end     
         end
-     
     end
     
-    
-    % pedestrian safety constraints
-%     if (s_break~=0)
-%         xp_lim = param.crossing;
-%         c = [c;x(1)- xp_lim(1)+s_break];    % Change: the size sometimes increases, but it increases for the whole mpciteration here not just the treated prediction 
-%     end
     ceq = [];
 end
 
-function [A, b, Aeq, beq, lb, ub] = linearconstraints(t, x, u)
+function [A, b, Aeq, beq, lb, ub] = linearconstraints()
+%% Input Constraints
     A   = [];
     b   = [];
     Aeq = [];
     beq = [];
-    lb  = [-9; -0.4];
-    ub  = [5;0.2]; 
+    lb  = [-9; -0.2];   % Min input
+    ub  = [5;0.2];      % Max input
 end
 
 
@@ -200,7 +168,7 @@ function x_new = Non_linear_system(x, u, param)
 end
 
 
- function y = system(t, x, u, T, x_curr, param, linearisation)
+ function y = system(x, u, T, x_curr, linearisation)
  %% Dynamics of the system 
     A_d = linearisation.A;
     B_d = linearisation.B;
@@ -209,8 +177,8 @@ end
     y = x_curr + T*f + A_d*(x - x_curr) + B_d*u;
  end
  
- function [A_d, B_d] = discret_system_matrices(t, x, u, T, param)
- %% Values taken from "Appendix A", the LINEARIZED AND DISCRETIZED SYSTEM MATRICES
+ function [A_d, B_d] = discret_system_matrices(x, u, T, param)
+ %% Dynamic system Matrices
  [~,~,phi,v,~,delta] = curr_state_input(x, u);
 
  l_r = param.distance(1);
@@ -250,7 +218,7 @@ end
  
  end
     
- function [s,d,phi,v,a,delta] =  curr_state_input (x, u )
+ function [s,d,phi,v,a,delta] =  curr_state_input (x, u)
  %% Split the state and input vectors into components
  s = x(1);
  d = x(2);
@@ -285,6 +253,7 @@ function plotTrajectories( x, x0, param, x_ref, xp0, Xp, Crosses)
     xp_lim = param.crossing; 
     y_lim = param.Lane;
     y_middle = (y_lim(1)+y_lim(2))/2; % middle line between lanes
+    
     % Color the pedestrian path
     x_ped = [xp_lim(1), xp_lim(1), xp_lim(2), xp_lim(2), xp_lim(1)];
     y_ped = [y_lim(1), y_lim(2), y_lim(2), y_lim(1), y_lim(1)];
@@ -305,7 +274,7 @@ function plotTrajectories( x, x0, param, x_ref, xp0, Xp, Crosses)
         plot(linspace(-2,30,100),y_lim(2)*ones(100),'black')
         
         
-        % Plot Pedesterian prediction
+        % Plot Pedesterian predictions
         for i=1:size(Crosses)
             if (Crosses(i) == 1)
                 plot(Xp(1,i),Xp(2,i),'xr', 'MarkerFaceColor','g')
@@ -319,17 +288,9 @@ function plotTrajectories( x, x0, param, x_ref, xp0, Xp, Crosses)
         % Plot Pedesterian current position
         plot(xp0(1),xp0(2),'o','MarkerFaceColor','black')
         
-      % Plot reference with control Points
-        % plot(x_ref(1,:),x_ref(2,:),'o', ...
-        %linspace(x_ref(1,1),x_ref(1,length(x_ref)),100),linspace(x_ref(2,1),x_ref(2,length(x_ref)), 100),'r')
-        
         % Plot reference Path
         plot(linspace(x_ref(1,1),x_ref(1,length(x_ref)),100),linspace(x_ref(2,1),x_ref(2,length(x_ref)), 100),'r')
-      
-       % THIS plots the predicted path
-       % plot(x(1,:),x(2,:),'or', 'MarkerFaceColor','r');
-        %plot(C(:,2)+x(1),C(:,1)+x(2),'b')   
-        
+              
        % Plot the actual trajectory of the car
         plot(C(:,1)+x0(1)-L/2,C(:,2)+x0(2)-B/2,'b')
         
@@ -341,29 +302,26 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%Pedestrian%%%%%%%
 % xp = [x,y,vx,vy] 4 x 1 
-function [y, y_nmpc] = Pedest_dynamics(xp,T,w) % change: predefined noise
+function [y, y_nmpc] = Pedest_dynamics(xp,T,w) 
 %% Pedestrian dynamics
 
     F = [1 0 T 0; 0 1 0 T; 0 0 1 0; 0 0 0 1];
     t = (T^2)/2;
-    %G = [t 0;0 t; T 0; 0 T];
-    G = [0 0;0 t; 0 0; 0 T];    % no noise on the longitudinal input
+    G = [0 0;0 t; 0 0; 0 T];
+    
     % Prediction of the pedestrian next movement
     y_nmpc = F*xp;
 
     % Actual movement with Gaussian Noise
     %w = randn(2,1);
     y = y_nmpc + G*w;
-    %%%%%%5
-    y = y_nmpc;
-
 end
 
 function Xp = Pedest_prediction(T,xp0,N,w)
 %% Prediction of the pedestrian Path
     Xp(:,1) = xp0;
     for k=1:N
-       [~,yp]  = Pedest_dynamics(Xp(:,k),T,w);  
+       [~,yp]  = Pedest_dynamics(Xp(:,k),T,w(:,1));  
         Xp(:,k+1)= yp;   
     end
 end
